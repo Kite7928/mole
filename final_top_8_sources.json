@@ -1,0 +1,45 @@
+{
+    "cache_time": 7200,
+    "api_site": {
+        "kuaikan.com": {
+            "name": "[快看]",
+            "api": "https://kuaikan.com/api.php/provide/vod",
+            "detail": "https://kuaikan.com"
+        },
+        "yiso.fun": {
+            "name": "[易搜]",
+            "api": "https://yiso.fun/api.php/provide/vod",
+            "detail": "https://yiso.fun"
+        },
+        "www.maoyanzy.com": {
+            "name": "[猫眼资源]",
+            "api": "https://api.maoyanapi.top/api.php/provide/vod",
+            "detail": "https://api.maoyanapi.top"
+        },
+        "zhaozy.com": {
+            "name": "[找资源]",
+            "api": "https://zhaozy.com/api.php/provide/vod",
+            "detail": "https://zhaozy.com"
+        },
+        "bttwoo.com": {
+            "name": "[比特]",
+            "api": "https://bttwoo.com/api.php/provide/vod",
+            "detail": "https://bttwoo.com"
+        },
+        "kkys.me": {
+            "name": "[酷看]",
+            "api": "https://kkys.me/api.php/provide/vod",
+            "detail": "https://kkys.me"
+        },
+        "360zy.com": {
+            "name": "[360资源]",
+            "api": "https://360zyzz.com/api.php/provide/vod",
+            "detail": "https://360zyzz.com"
+        },
+        "anime1.com": {
+            "name": "[动漫]",
+            "api": "https://anime1.me/api.php/provide/vod",
+            "detail": "https://anime1.me"
+        }
+    }
+}
