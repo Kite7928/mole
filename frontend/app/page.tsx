@@ -45,13 +45,17 @@ export default function DashboardPage() {
               </div>
             </div>
             <div className="flex items-center space-x-2">
-              <Button variant="outline" size="sm">
-                <Settings className="mr-2 h-4 w-4" />
-                设置
+              <Button variant="outline" size="sm" asChild>
+                <a href="/settings">
+                  <Settings className="mr-2 h-4 w-4" />
+                  设置
+                </a>
               </Button>
-              <Button size="sm">
-                <Plus className="mr-2 h-4 w-4" />
-                新建文章
+              <Button size="sm" asChild>
+                <a href="/articles/create">
+                  <Plus className="mr-2 h-4 w-4" />
+                  新建文章
+                </a>
               </Button>
             </div>
           </div>
@@ -112,9 +116,13 @@ export default function DashboardPage() {
           <TabsList className="grid w-full grid-cols-5">
             <TabsTrigger value="overview">仪表板</TabsTrigger>
             <TabsTrigger value="articles">文章</TabsTrigger>
-            <TabsTrigger value="hotspots">热点</TabsTrigger>
+            <TabsTrigger value="hotspots" asChild>
+                <a href="/hotspots">热点</a>
+              </TabsTrigger>
             <TabsTrigger value="statistics">统计</TabsTrigger>
-            <TabsTrigger value="settings">设置</TabsTrigger>
+            <TabsTrigger value="settings" asChild>
+                <a href="/settings">设置</a>
+              </TabsTrigger>
           </TabsList>
 
           {/* Overview Tab */}
@@ -127,13 +135,17 @@ export default function DashboardPage() {
                   <CardDescription>常用功能快捷入口</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  <Button className="w-full justify-start" variant="default">
-                    <Zap className="mr-2 h-4 w-4" />
-                    一键生成文章
+                  <Button className="w-full justify-start" variant="default" asChild>
+                    <a href="/articles/create">
+                      <Zap className="mr-2 h-4 w-4" />
+                      一键生成文章
+                    </a>
                   </Button>
-                  <Button className="w-full justify-start" variant="outline">
-                    <TrendingUp className="mr-2 h-4 w-4" />
-                    查看热点趋势
+                  <Button className="w-full justify-start" variant="outline" asChild>
+                    <a href="/hotspots">
+                      <TrendingUp className="mr-2 h-4 w-4" />
+                      查看热点趋势
+                    </a>
                   </Button>
                   <Button className="w-full justify-start" variant="outline">
                     <Calendar className="mr-2 h-4 w-4" />
@@ -229,8 +241,10 @@ export default function DashboardPage() {
                       </div>
                       <div className="flex items-center space-x-2">
                         <Badge variant="secondary">热度 {item.hot}</Badge>
-                        <Button size="sm" variant="ghost">
-                          <ArrowRight className="h-4 w-4" />
+                        <Button size="sm" variant="ghost" asChild>
+                          <a href="/hotspots">
+                            <ArrowRight className="h-4 w-4" />
+                          </a>
                         </Button>
                       </div>
                     </div>
@@ -252,9 +266,11 @@ export default function DashboardPage() {
                   <BookOpen className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
                   <h3 className="text-lg font-semibold mb-2">暂无文章</h3>
                   <p className="text-muted-foreground mb-4">开始创建你的第一篇文章吧</p>
-                  <Button>
-                    <Plus className="mr-2 h-4 w-4" />
-                    创建文章
+                  <Button asChild>
+                    <a href="/articles/create">
+                      <Plus className="mr-2 h-4 w-4" />
+                      创建文章
+                    </a>
                   </Button>
                 </div>
               </CardContent>
@@ -272,7 +288,13 @@ export default function DashboardPage() {
                 <div className="text-center py-12">
                   <TrendingUp className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
                   <h3 className="text-lg font-semibold mb-2">热点加载中</h3>
-                  <p className="text-muted-foreground">正在获取最新热点信息...</p>
+                  <p className="text-muted-foreground mb-4">正在获取最新热点信息...</p>
+                  <Button asChild>
+                    <a href="/hotspots">
+                      <TrendingUp className="mr-2 h-4 w-4" />
+                      查看所有热点
+                    </a>
+                  </Button>
                 </div>
               </CardContent>
             </Card>
@@ -303,56 +325,16 @@ export default function DashboardPage() {
                 <CardDescription>配置系统参数和API</CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="space-y-6">
-                  <div>
-                    <h3 className="text-lg font-semibold mb-4">AI配置</h3>
-                    <div className="space-y-4">
-                      <div>
-                        <label className="text-sm font-medium mb-2 block">OpenAI API Key</label>
-                        <input
-                          type="password"
-                          placeholder="sk-..."
-                          className="w-full px-3 py-2 bg-input border border-border rounded-md"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-sm font-medium mb-2 block">Base URL</label>
-                        <input
-                          type="text"
-                          placeholder="https://api.openai.com/v1"
-                          className="w-full px-3 py-2 bg-input border border-border rounded-md"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <Separator />
-
-                  <div>
-                    <h3 className="text-lg font-semibold mb-4">微信公众号配置</h3>
-                    <div className="space-y-4">
-                      <div>
-                        <label className="text-sm font-medium mb-2 block">AppID</label>
-                        <input
-                          type="text"
-                          placeholder="wx..."
-                          className="w-full px-3 py-2 bg-input border border-border rounded-md"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-sm font-medium mb-2 block">AppSecret</label>
-                        <input
-                          type="password"
-                          placeholder="..."
-                          className="w-full px-3 py-2 bg-input border border-border rounded-md"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex justify-end">
-                    <Button>保存配置</Button>
-                  </div>
+                <div className="text-center py-12">
+                  <Settings className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+                  <h3 className="text-lg font-semibold mb-2">系统设置</h3>
+                  <p className="text-muted-foreground mb-4">配置 AI 模型、微信公众号等参数</p>
+                  <Button asChild>
+                    <a href="/settings">
+                      <Settings className="mr-2 h-4 w-4" />
+                      打开设置页面
+                    </a>
+                  </Button>
                 </div>
               </CardContent>
             </Card>
