@@ -9,6 +9,21 @@ from .security import (
     create_refresh_token
 )
 from .logger import logger, setup_logger
+from .performance import (
+    time_it,
+    retry_on_failure,
+    cache_result,
+    rate_limit,
+    batch_process
+)
+from .monitoring import (
+    track_requests,
+    track_article_generation,
+    track_news_fetch,
+    track_wechat_api,
+    update_system_info,
+    get_metrics_summary
+)
 
 __all__ = [
     "settings",
@@ -24,4 +39,15 @@ __all__ = [
     "create_refresh_token",
     "logger",
     "setup_logger",
+    "time_it",
+    "retry_on_failure",
+    "cache_result",
+    "rate_limit",
+    "batch_process",
+    "track_requests",
+    "track_article_generation",
+    "track_news_fetch",
+    "track_wechat_api",
+    "update_system_info",
+    "get_metrics_summary",
 ]
