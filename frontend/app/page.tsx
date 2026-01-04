@@ -139,6 +139,12 @@ export default function DashboardPage() {
                     <Calendar className="mr-2 h-4 w-4" />
                     定时任务管理
                   </Button>
+                  <Button className="w-full justify-start" variant="outline" asChild>
+                    <a href="/statistics">
+                      <BarChart3 className="mr-2 h-4 w-4" />
+                      数据统计分析
+                    </a>
+                  </Button>
                 </CardContent>
               </Card>
 
