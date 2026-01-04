@@ -34,7 +34,7 @@
 
 ### 后端技术栈
 ```
-FastAPI (Python 3.11+)          # 高性能异步Web框架
+FastAPI (Python 3.10+)          # 高性能异步Web框架
 ├── PostgreSQL                  # 主数据库
 ├── Redis                       # 缓存和消息队列
 ├── Celery                      # 分布式任务队列

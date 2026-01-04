@@ -14,7 +14,7 @@
 ## 环境要求
 
 ### 基础要求
-- Python 3.11+
+- Python 3.10+
 - Node.js 18+
 - PostgreSQL 14+
 - Redis 7+

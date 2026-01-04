@@ -40,7 +40,7 @@
 ## 📋 技术栈
 
 ### 后端
-- **框架**: FastAPI (Python 3.11+)
+- **框架**: FastAPI (Python 3.10+)
 - **数据库**: PostgreSQL + Redis
 - **任务队列**: Celery
 - **ORM**: SQLAlchemy 2.0
@@ -90,7 +90,7 @@
 ## 🚦 快速开始
 
 ### 环境要求
-- Python 3.11+
+- Python 3.10+
 - Node.js 18+
 - PostgreSQL 14+
 - Redis 7+

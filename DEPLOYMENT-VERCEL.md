@@ -38,7 +38,7 @@
 ### 前置要求
 
 - Node.js 18+
-- Python 3.11+ (仅用于本地开发)
+- Python 3.10+ (仅用于本地开发)
 - Vercel 账号
 - Cloudflare 账号
 - Railway 账号
