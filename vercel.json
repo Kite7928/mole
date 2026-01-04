@@ -1,0 +1,54 @@
+{
+  "version": 2,
+  "name": "wechat-ai-writer-pro",
+  "builds": [
+    {
+      "src": "frontend/package.json",
+      "use": "@vercel/next"
+    },
+    {
+      "src": "backend/app/api/**/*.py",
+      "use": "@vercel/python"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "/backend/app/api/$1"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/frontend/$1"
+    }
+  ],
+  "env": {
+    "NEXT_PUBLIC_API_URL": "@api-url",
+    "DATABASE_URL": "@database-url",
+    "REDIS_URL": "@redis-url",
+    "OPENAI_API_KEY": "@openai-api-key",
+    "OPENAI_BASE_URL": "@openai-base-url",
+    "WECHAT_APP_ID": "@wechat-app-id",
+    "WECHAT_APP_SECRET": "@wechat-app-secret",
+    "SECRET_KEY": "@secret-key"
+  },
+  "build": {
+    "env": {
+      "PYTHON_VERSION": "3.11"
+    }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/daily-news",
+      "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/cron/hot-topics",
+      "schedule": "0 */4 * * *"
+    }
+  ],
+  "functions": {
+    "backend/app/api/**/*.py": {
+      "maxDuration": 60
+    }
+  }
+}
