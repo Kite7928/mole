@@ -1,0 +1,160 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: wechat_ai_writer_postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: wechat_ai_writer
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - app_network
+
+  # Redis
+  redis:
+    image: redis:7-alpine
+    container_name: wechat_ai_writer_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - app_network
+
+  # Main Application (from Docker Hub)
+  app:
+    image: ${DOCKER_IMAGE:-your-dockerhub-username/wechat-ai-writer-pro:latest}
+    container_name: wechat_ai_writer_app
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/wechat_ai_writer
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: ${SECRET_KEY:-your-secret-key-change-in-production}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      WECHAT_APP_ID: ${WECHAT_APP_ID}
+      WECHAT_APP_SECRET: ${WECHAT_APP_SECRET}
+    ports:
+      - "8000:8000"
+      - "3000:3000"
+    volumes:
+      - uploads_data:/app/uploads
+      - temp_data:/app/temp
+      - logs_data:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - app_network
+    command: ["/app/entrypoint.sh", "backend"]
+
+  # Frontend Service
+  frontend:
+    image: ${DOCKER_IMAGE:-your-dockerhub-username/wechat-ai-writer-pro:latest}
+    container_name: wechat_ai_writer_frontend
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    ports:
+      - "3001:3000"
+    depends_on:
+      - app
+    networks:
+      - app_network
+    command: ["/app/entrypoint.sh", "frontend"]
+
+  # Celery Worker
+  celery_worker:
+    image: ${DOCKER_IMAGE:-your-dockerhub-username/wechat-ai-writer-pro:latest}
+    container_name: wechat_ai_writer_celery_worker
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/wechat_ai_writer
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: ${SECRET_KEY:-your-secret-key-change-in-production}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      WECHAT_APP_ID: ${WECHAT_APP_ID}
+      WECHAT_APP_SECRET: ${WECHAT_APP_SECRET}
+    volumes:
+      - uploads_data:/app/uploads
+      - temp_data:/app/temp
+      - logs_data:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - app_network
+    command: ["/app/entrypoint.sh", "worker"]
+
+  # Celery Beat (Scheduler)
+  celery_beat:
+    image: ${DOCKER_IMAGE:-your-dockerhub-username/wechat-ai-writer-pro:latest}
+    container_name: wechat_ai_writer_celery_beat
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/wechat_ai_writer
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: ${SECRET_KEY:-your-secret-key-change-in-production}
+    volumes:
+      - logs_data:/app/logs
+    depends_on:
+      - redis
+    networks:
+      - app_network
+    command: ["/app/entrypoint.sh", "beat"]
+
+  # Flower (Celery Monitor)
+  flower:
+    image: ${DOCKER_IMAGE:-your-dockerhub-username/wechat-ai-writer-pro:latest}
+    container_name: wechat_ai_writer_flower
+    environment:
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "5555:5555"
+    depends_on:
+      - redis
+    networks:
+      - app_network
+    command: ["/app/entrypoint.sh", "flower"]
+
+  # Nginx Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    container_name: wechat_ai_writer_nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - app
+      - frontend
+    networks:
+      - app_network
+
+volumes:
+  postgres_data:
+  redis_data:
+  uploads_data:
+  temp_data:
+  logs_data:
+
+networks:
+  app_network:
+    driver: bridge

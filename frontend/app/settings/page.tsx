@@ -24,10 +24,17 @@ export default function SettingsPage() {
   const [showSecrets, setShowSecrets] = useState<Record<string, boolean>>({})
 
   const [config, setConfig] = useState({
+    // Application Config
+    appName: 'AI公众号自动写作助手 Pro',
+    appVersion: '1.0.0',
+    secretKey: '',
+
     // LLM Config
     openaiApiKey: '',
     openaiBaseUrl: 'https://api.openai.com/v1',
     openaiModel: 'gpt-4-turbo-preview',
+    openaiMaxTokens: 4000,
+    openaiTemperature: 0.7,
     deepseekApiKey: '',
     deepseekBaseUrl: 'https://api.deepseek.com/v1',
     deepseekModel: 'deepseek-chat',
@@ -42,15 +49,40 @@ export default function SettingsPage() {
     wechatAppSecret: '',
 
     // Database Config
-    databaseUrl: 'postgresql+asyncpg://user:password@localhost:5432/wechat_ai_writer',
-    redisUrl: 'redis://localhost:6379/0',
+    databaseUrl: 'postgresql+asyncpg://postgres:postgres@postgres:5432/wechat_ai_writer',
+    redisUrl: 'redis://redis:6379/0',
+
+    // Task Config
+    celeryBrokerUrl: 'redis://redis:6379/1',
+    celeryResultBackend: 'redis://redis:6379/1',
+    taskTimeout: 3600,
+    taskMaxRetries: 3,
+
+    // File Storage Config
+    uploadDir: 'uploads',
+    tempDir: 'temp',
+    maxUploadSize: 20971520,
 
     // Image Config
     coverImageWidth: 1280,
     coverImageHeight: 720,
     coverImageMinWidth: 900,
     coverImageMinHeight: 500,
-    imageMaxSize: 5242880, // 5MB
+    imageMaxSize: 5242880,
+
+    // Logging Config
+    logLevel: 'INFO',
+    logFile: 'logs/app.log',
+
+    // Monitoring Config
+    enableMetrics: true,
+    metricsPort: 9090,
+    sentryDsn: '',
+
+    // Security Config
+    rateLimitEnabled: true,
+    rateLimitRequests: 100,
+    rateLimitPeriod: 60,
 
     // Feature Config
     enableResearch: true,
@@ -162,7 +194,7 @@ export default function SettingsPage() {
       {/* Main Content */}
       <main className="container mx-auto px-4 py-6">
         <Tabs defaultValue="llm" className="space-y-4">
-          <TabsList className="grid w-full grid-cols-5">
+          <TabsList className="grid w-full grid-cols-9 overflow-x-auto">
             <TabsTrigger value="llm">
               <Bot className="mr-2 h-4 w-4" />
               AI模型
@@ -175,9 +207,25 @@ export default function SettingsPage() {
               <Database className="mr-2 h-4 w-4" />
               数据库
             </TabsTrigger>
+            <TabsTrigger value="app">
+              <SettingsIcon className="mr-2 h-4 w-4" />
+              应用配置
+            </TabsTrigger>
+            <TabsTrigger value="task">
+              <Zap className="mr-2 h-4 w-4" />
+              任务配置
+            </TabsTrigger>
             <TabsTrigger value="image">
               <ImageIcon className="mr-2 h-4 w-4" />
               图片配置
+            </TabsTrigger>
+            <TabsTrigger value="logging">
+              <CheckCircle2 className="mr-2 h-4 w-4" />
+              日志配置
+            </TabsTrigger>
+            <TabsTrigger value="security">
+              <AlertCircle className="mr-2 h-4 w-4" />
+              安全配置
             </TabsTrigger>
             <TabsTrigger value="features">
               <SettingsIcon className="mr-2 h-4 w-4" />
@@ -193,10 +241,23 @@ export default function SettingsPage() {
                 <CardDescription>配置多个 AI 模型的 API 密钥和参数</CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
+                <div className="bg-purple-50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-800 p-4 rounded-lg">
+                  <div className="flex items-start space-x-3">
+                    <Bot className="h-5 w-5 text-purple-600 dark:text-purple-400 mt-0.5" />
+                    <div>
+                      <h4 className="font-medium text-purple-900 dark:text-purple-100 mb-1">智能提示</h4>
+                      <p className="text-sm text-purple-700 dark:text-purple-300">你可以配置多个 AI 模型，系统会自动选择可用的模型进行内容生成。建议至少配置一个主要模型。</p>
+                    </div>
+                  </div>
+                </div>
+
                 {/* OpenAI */}
-                <div>
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-semibold">OpenAI</h3>
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <h3 className="text-lg font-semibold">OpenAI</h3>
+                      <Badge variant="default" className="text-xs">推荐</Badge>
+                    </div>
                     <Button
                       size="sm"
                       variant="outline"
@@ -205,7 +266,7 @@ export default function SettingsPage() {
                       测试连接
                     </Button>
                   </div>
-                  <div className="space-y-4">
+                  <div className="bg-muted/50 p-4 rounded-lg space-y-4">
                     {renderSecretInput(
                       'API Key',
                       config.openaiApiKey,
@@ -220,7 +281,7 @@ export default function SettingsPage() {
                         value={config.openaiBaseUrl}
                         onChange={(e) => setConfig({ ...config, openaiBaseUrl: e.target.value })}
                         placeholder="https://api.openai.com/v1"
-                        className="w-full px-3 py-2 bg-input border border-border rounded-md"
+                        className="w-full px-3 py-2 bg-input border border-border rounded-md focus:ring-2 focus:ring-primary focus:border-transparent"
                       />
                     </div>
                     <div>
@@ -228,12 +289,35 @@ export default function SettingsPage() {
                       <select
                         value={config.openaiModel}
                         onChange={(e) => setConfig({ ...config, openaiModel: e.target.value })}
-                        className="w-full px-3 py-2 bg-input border border-border rounded-md"
+                        className="w-full px-3 py-2 bg-input border border-border rounded-md focus:ring-2 focus:ring-primary focus:border-transparent"
                       >
-                        <option value="gpt-4-turbo-preview">GPT-4 Turbo</option>
+                        <option value="gpt-4-turbo-preview">GPT-4 Turbo (推荐)</option>
                         <option value="gpt-4">GPT-4</option>
                         <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
                       </select>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-sm font-medium mb-2 block">最大 Token 数</label>
+                        <input
+                          type="number"
+                          value={config.openaiMaxTokens}
+                          onChange={(e) => setConfig({ ...config, openaiMaxTokens: parseInt(e.target.value) })}
+                          className="w-full px-3 py-2 bg-input border border-border rounded-md"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-sm font-medium mb-2 block">温度 (0-2)</label>
+                        <input
+                          type="number"
+                          step="0.1"
+                          min="0"
+                          max="2"
+                          value={config.openaiTemperature}
+                          onChange={(e) => setConfig({ ...config, openaiTemperature: parseFloat(e.target.value) })}
+                          className="w-full px-3 py-2 bg-input border border-border rounded-md"
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -241,9 +325,12 @@ export default function SettingsPage() {
                 <Separator />
 
                 {/* DeepSeek */}
-                <div>
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-semibold">DeepSeek</h3>
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <h3 className="text-lg font-semibold">DeepSeek</h3>
+                      <Badge variant="secondary" className="text-xs">性价比高</Badge>
+                    </div>
                     <Button
                       size="sm"
                       variant="outline"
@@ -252,7 +339,7 @@ export default function SettingsPage() {
                       测试连接
                     </Button>
                   </div>
-                  <div className="space-y-4">
+                  <div className="bg-muted/50 p-4 rounded-lg space-y-4">
                     {renderSecretInput(
                       'API Key',
                       config.deepseekApiKey,
@@ -267,7 +354,7 @@ export default function SettingsPage() {
                         value={config.deepseekBaseUrl}
                         onChange={(e) => setConfig({ ...config, deepseekBaseUrl: e.target.value })}
                         placeholder="https://api.deepseek.com/v1"
-                        className="w-full px-3 py-2 bg-input border border-border rounded-md"
+                        className="w-full px-3 py-2 bg-input border border-border rounded-md focus:ring-2 focus:ring-primary focus:border-transparent"
                       />
                     </div>
                     <div>
@@ -275,7 +362,7 @@ export default function SettingsPage() {
                       <select
                         value={config.deepseekModel}
                         onChange={(e) => setConfig({ ...config, deepseekModel: e.target.value })}
-                        className="w-full px-3 py-2 bg-input border border-border rounded-md"
+                        className="w-full px-3 py-2 bg-input border border-border rounded-md focus:ring-2 focus:ring-primary focus:border-transparent"
                       >
                         <option value="deepseek-chat">DeepSeek Chat</option>
                         <option value="deepseek-coder">DeepSeek Coder</option>
@@ -287,9 +374,12 @@ export default function SettingsPage() {
                 <Separator />
 
                 {/* Claude */}
-                <div>
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-semibold">Claude</h3>
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <h3 className="text-lg font-semibold">Claude</h3>
+                      <Badge variant="secondary" className="text-xs">长文本</Badge>
+                    </div>
                     <Button
                       size="sm"
                       variant="outline"
@@ -298,7 +388,7 @@ export default function SettingsPage() {
                       测试连接
                     </Button>
                   </div>
-                  <div className="space-y-4">
+                  <div className="bg-muted/50 p-4 rounded-lg space-y-4">
                     {renderSecretInput(
                       'API Key',
                       config.claudeApiKey,
@@ -313,7 +403,7 @@ export default function SettingsPage() {
                         value={config.claudeBaseUrl}
                         onChange={(e) => setConfig({ ...config, claudeBaseUrl: e.target.value })}
                         placeholder="https://api.anthropic.com/v1"
-                        className="w-full px-3 py-2 bg-input border border-border rounded-md"
+                        className="w-full px-3 py-2 bg-input border border-border rounded-md focus:ring-2 focus:ring-primary focus:border-transparent"
                       />
                     </div>
                     <div>
@@ -321,11 +411,11 @@ export default function SettingsPage() {
                       <select
                         value={config.claudeModel}
                         onChange={(e) => setConfig({ ...config, claudeModel: e.target.value })}
-                        className="w-full px-3 py-2 bg-input border border-border rounded-md"
+                        className="w-full px-3 py-2 bg-input border border-border rounded-md focus:ring-2 focus:ring-primary focus:border-transparent"
                       >
-                        <option value="claude-3-opus-20240229">Claude 3 Opus</option>
-                        <option value="claude-3-sonnet-20240229">Claude 3 Sonnet</option>
-                        <option value="claude-3-haiku-20240307">Claude 3 Haiku</option>
+                        <option value="claude-3-opus-20240229">Claude 3 Opus (最强)</option>
+                        <option value="claude-3-sonnet-20240229">Claude 3 Sonnet (平衡)</option>
+                        <option value="claude-3-haiku-20240307">Claude 3 Haiku (快速)</option>
                       </select>
                     </div>
                   </div>
@@ -334,9 +424,12 @@ export default function SettingsPage() {
                 <Separator />
 
                 {/* Gemini */}
-                <div>
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-semibold">Gemini</h3>
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <h3 className="text-lg font-semibold">Gemini</h3>
+                      <Badge variant="outline" className="text-xs">Google</Badge>
+                    </div>
                     <Button
                       size="sm"
                       variant="outline"
@@ -345,7 +438,7 @@ export default function SettingsPage() {
                       测试连接
                     </Button>
                   </div>
-                  <div className="space-y-4">
+                  <div className="bg-muted/50 p-4 rounded-lg space-y-4">
                     {renderSecretInput(
                       'API Key',
                       config.geminiApiKey,
@@ -358,7 +451,7 @@ export default function SettingsPage() {
                       <select
                         value={config.geminiModel}
                         onChange={(e) => setConfig({ ...config, geminiModel: e.target.value })}
-                        className="w-full px-3 py-2 bg-input border border-border rounded-md"
+                        className="w-full px-3 py-2 bg-input border border-border rounded-md focus:ring-2 focus:ring-primary focus:border-transparent"
                       >
                         <option value="gemini-pro">Gemini Pro</option>
                         <option value="gemini-pro-vision">Gemini Pro Vision</option>
@@ -375,37 +468,71 @@ export default function SettingsPage() {
             <Card>
               <CardHeader>
                 <CardTitle>微信公众号配置</CardTitle>
-                <CardDescription>配置微信公众号的 AppID 和 AppSecret</CardDescription>
+                <CardDescription>配置微信公众号的 AppID 和 AppSecret 以实现自动发布</CardDescription>
               </CardHeader>
-              <CardContent className="space-y-4">
-                <div>
-                  <label className="text-sm font-medium mb-2 block">AppID</label>
-                  <input
-                    type="text"
-                    value={config.wechatAppId}
-                    onChange={(e) => setConfig({ ...config, wechatAppId: e.target.value })}
-                    placeholder="wx..."
-                    className="w-full px-3 py-2 bg-input border border-border rounded-md"
-                  />
+              <CardContent className="space-y-6">
+                <div className="bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 p-4 rounded-lg">
+                  <div className="flex items-start space-x-3">
+                    <Key className="h-5 w-5 text-green-600 dark:text-green-400 mt-0.5" />
+                    <div>
+                      <h4 className="font-medium text-green-900 dark:text-green-100 mb-1">为什么需要配置？</h4>
+                      <p className="text-sm text-green-700 dark:text-green-300">配置微信公众号后，系统可以自动将生成的文章发布到你的公众号，实现全流程自动化。</p>
+                    </div>
+                  </div>
                 </div>
-                {renderSecretInput(
-                  'AppSecret',
-                  config.wechatAppSecret,
-                  (value) => setConfig({ ...config, wechatAppSecret: value }),
-                  '...',
-                  'wechatAppSecret'
-                )}
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-sm font-medium mb-2 flex items-center">
+                      AppID
+                      <Badge variant="outline" className="ml-2 text-xs">必需</Badge>
+                    </label>
+                    <input
+                      type="text"
+                      value={config.wechatAppId}
+                      onChange={(e) => setConfig({ ...config, wechatAppId: e.target.value })}
+                      placeholder="wx..."
+                      className="w-full px-3 py-2 bg-input border border-border rounded-md focus:ring-2 focus:ring-primary focus:border-transparent"
+                    />
+                    <p className="text-xs text-muted-foreground mt-2">
+                      微信公众号的唯一标识符，以 wx 开头
+                    </p>
+                  </div>
+
+                  {renderSecretInput(
+                    'AppSecret',
+                    config.wechatAppSecret,
+                    (value) => setConfig({ ...config, wechatAppSecret: value }),
+                    '...',
+                    'wechatAppSecret'
+                  )}
+                  <p className="text-xs text-muted-foreground">
+                    用于接口调用的密钥，请妥善保管
+                  </p>
+                </div>
+
+                <Separator />
+
                 <div className="bg-muted/50 p-4 rounded-lg">
-                  <h4 className="font-medium mb-2 flex items-center">
+                  <h4 className="font-medium mb-3 flex items-center">
                     <AlertCircle className="mr-2 h-4 w-4" />
                     如何获取 AppID 和 AppSecret?
                   </h4>
-                  <ol className="text-sm text-muted-foreground space-y-1 list-decimal list-inside">
-                    <li>登录微信公众平台</li>
+                  <ol className="text-sm text-muted-foreground space-y-2 list-decimal list-inside">
+                    <li>登录 <a href="https://mp.weixin.qq.com" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">微信公众平台</a></li>
                     <li>进入 "开发 > 基本配置"</li>
                     <li>查看 AppID 和生成 AppSecret</li>
-                    <li>配置服务器地址和令牌</li>
+                    <li>配置服务器地址和令牌（如果需要）</li>
                   </ol>
+                </div>
+
+                <div className="bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 p-4 rounded-lg">
+                  <h4 className="font-medium mb-2 text-blue-900 dark:text-blue-100">注意事项</h4>
+                  <ul className="text-sm text-blue-700 dark:text-blue-300 space-y-1 list-disc list-inside">
+                    <li>AppSecret 只显示一次，请立即保存</li>
+                    <li>确保公众号已认证（服务号或订阅号）</li>
+                    <li>需要开启公众号的"开发者权限"</li>
+                  </ul>
                 </div>
               </CardContent>
             </Card>
@@ -416,36 +543,68 @@ export default function SettingsPage() {
             <Card>
               <CardHeader>
                 <CardTitle>数据库配置</CardTitle>
-                <CardDescription>配置 PostgreSQL 和 Redis 连接</CardDescription>
+                <CardDescription>配置 PostgreSQL 和 Redis 连接信息</CardDescription>
               </CardHeader>
-              <CardContent className="space-y-4">
+              <CardContent className="space-y-6">
+                <div className="bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 p-4 rounded-lg">
+                  <div className="flex items-start space-x-3">
+                    <AlertCircle className="h-5 w-5 text-blue-600 dark:text-blue-400 mt-0.5" />
+                    <div>
+                      <h4 className="font-medium text-blue-900 dark:text-blue-100 mb-1">为什么需要配置数据库？</h4>
+                      <p className="text-sm text-blue-700 dark:text-blue-300">数据库用于存储文章、任务记录和系统配置。如果你使用 Docker 部署，通常使用默认配置即可。</p>
+                    </div>
+                  </div>
+                </div>
+
                 <div>
-                  <label className="text-sm font-medium mb-2 block">PostgreSQL URL</label>
+                  <label className="text-sm font-medium mb-2 flex items-center">
+                    PostgreSQL 连接地址
+                    <Badge variant="outline" className="ml-2 text-xs">必需</Badge>
+                  </label>
                   <input
                     type="text"
                     value={config.databaseUrl}
                     onChange={(e) => setConfig({ ...config, databaseUrl: e.target.value })}
-                    placeholder="postgresql+asyncpg://user:password@localhost:5432/db"
-                    className="w-full px-3 py-2 bg-input border border-border rounded-md font-mono text-sm"
+                    placeholder="postgresql+asyncpg://user:password@localhost:5432/wechat_ai_writer"
+                    className="w-full px-3 py-2 bg-input border border-border rounded-md font-mono text-sm focus:ring-2 focus:ring-primary focus:border-transparent"
                   />
+                  <p className="text-xs text-muted-foreground mt-2">
+                    格式: postgresql+asyncpg://用户名:密码@主机:端口/数据库名
+                  </p>
                 </div>
+
                 <div>
-                  <label className="text-sm font-medium mb-2 block">Redis URL</label>
+                  <label className="text-sm font-medium mb-2 flex items-center">
+                    Redis 连接地址
+                    <Badge variant="outline" className="ml-2 text-xs">必需</Badge>
+                  </label>
                   <input
                     type="text"
                     value={config.redisUrl}
                     onChange={(e) => setConfig({ ...config, redisUrl: e.target.value })}
                     placeholder="redis://localhost:6379/0"
-                    className="w-full px-3 py-2 bg-input border border-border rounded-md font-mono text-sm"
+                    className="w-full px-3 py-2 bg-input border border-border rounded-md font-mono text-sm focus:ring-2 focus:ring-primary focus:border-transparent"
                   />
+                  <p className="text-xs text-muted-foreground mt-2">
+                    格式: redis://主机:端口/数据库编号
+                  </p>
                 </div>
+
                 <div className="bg-muted/50 p-4 rounded-lg">
-                  <h4 className="font-medium mb-2">注意事项</h4>
-                  <ul className="text-sm text-muted-foreground space-y-1 list-disc list-inside">
-                    <li>确保数据库服务正在运行</li>
-                    <li>使用强密码保护数据库</li>
-                    <li>生产环境建议使用连接池</li>
-                  </ul>
+                  <h4 className="font-medium mb-2 flex items-center">
+                    <CheckCircle2 className="mr-2 h-4 w-4 text-green-600" />
+                    Docker 部署推荐配置
+                  </h4>
+                  <div className="space-y-2 text-sm">
+                    <div className="flex items-center justify-between p-2 bg-background rounded">
+                      <span className="text-muted-foreground">PostgreSQL:</span>
+                      <code className="text-xs bg-muted px-2 py-1 rounded">postgresql+asyncpg://postgres:postgres@postgres:5432/wechat_ai_writer</code>
+                    </div>
+                    <div className="flex items-center justify-between p-2 bg-background rounded">
+                      <span className="text-muted-foreground">Redis:</span>
+                      <code className="text-xs bg-muted px-2 py-1 rounded">redis://redis:6379/0</code>
+                    </div>
+                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -513,6 +672,322 @@ export default function SettingsPage() {
             </Card>
           </TabsContent>
 
+          {/* Logging Configuration */}
+          <TabsContent value="logging">
+            <Card>
+              <CardHeader>
+                <CardTitle>日志配置</CardTitle>
+                <CardDescription>配置系统日志记录和监控</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div>
+                  <label className="text-sm font-medium mb-2 block">日志级别</label>
+                  <select
+                    value={config.logLevel}
+                    onChange={(e) => setConfig({ ...config, logLevel: e.target.value })}
+                    className="w-full px-3 py-2 bg-input border border-border rounded-md"
+                  >
+                    <option value="DEBUG">DEBUG - 调试信息</option>
+                    <option value="INFO">INFO - 一般信息</option>
+                    <option value="WARNING">WARNING - 警告信息</option>
+                    <option value="ERROR">ERROR - 错误信息</option>
+                    <option value="CRITICAL">CRITICAL - 严重错误</option>
+                  </select>
+                  <p className="text-xs text-muted-foreground mt-2">
+                    生产环境建议使用 INFO 或 WARNING
+                  </p>
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium mb-2 block">日志文件路径</label>
+                  <input
+                    type="text"
+                    value={config.logFile}
+                    onChange={(e) => setConfig({ ...config, logFile: e.target.value })}
+                    placeholder="logs/app.log"
+                    className="w-full px-3 py-2 bg-input border border-border rounded-md"
+                  />
+                </div>
+
+                <Separator />
+
+                <div>
+                  <label className="text-sm font-medium mb-2 flex items-center">
+                    启用性能监控
+                  </label>
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="checkbox"
+                      checked={config.enableMetrics}
+                      onChange={(e) => setConfig({ ...config, enableMetrics: e.target.checked })}
+                      className="w-5 h-5"
+                    />
+                    <span className="text-sm text-muted-foreground">收集性能指标</span>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium mb-2 block">监控端口</label>
+                  <input
+                    type="number"
+                    value={config.metricsPort}
+                    onChange={(e) => setConfig({ ...config, metricsPort: parseInt(e.target.value) })}
+                    className="w-full px-3 py-2 bg-input border border-border rounded-md"
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    默认: 9090
+                  </p>
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium mb-2 block">Sentry DSN (可选)</label>
+                  <input
+                    type="text"
+                    value={config.sentryDsn}
+                    onChange={(e) => setConfig({ ...config, sentryDsn: e.target.value })}
+                    placeholder="https://xxx@sentry.io/xxx"
+                    className="w-full px-3 py-2 bg-input border border-border rounded-md"
+                  />
+                  <p className="text-xs text-muted-foreground mt-2">
+                    用于错误追踪和监控，留空则不启用
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Security Configuration */}
+          <TabsContent value="security">
+            <Card>
+              <CardHeader>
+                <CardTitle>安全配置</CardTitle>
+                <CardDescription>配置系统安全防护和访问控制</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 p-4 rounded-lg">
+                  <div className="flex items-start space-x-3">
+                    <AlertCircle className="h-5 w-5 text-red-600 dark:text-red-400 mt-0.5" />
+                    <div>
+                      <h4 className="font-medium text-red-900 dark:text-red-100 mb-1">安全提示</h4>
+                      <p className="text-sm text-red-700 dark:text-red-300">合理的限流配置可以防止恶意请求，保护系统稳定性。</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium mb-2 flex items-center">
+                    启用请求限流
+                  </label>
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="checkbox"
+                      checked={config.rateLimitEnabled}
+                      onChange={(e) => setConfig({ ...config, rateLimitEnabled: e.target.checked })}
+                      className="w-5 h-5"
+                    />
+                    <span className="text-sm text-muted-foreground">限制每个用户的请求频率</span>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium mb-2 block">限流请求数</label>
+                  <input
+                    type="number"
+                    value={config.rateLimitRequests}
+                    onChange={(e) => setConfig({ ...config, rateLimitRequests: parseInt(e.target.value) })}
+                    className="w-full px-3 py-2 bg-input border border-border rounded-md"
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    默认: 100 (每个时间窗口内的最大请求数)
+                  </p>
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium mb-2 block">限流时间周期 (秒)</label>
+                  <input
+                    type="number"
+                    value={config.rateLimitPeriod}
+                    onChange={(e) => setConfig({ ...config, rateLimitPeriod: parseInt(e.target.value) })}
+                    className="w-full px-3 py-2 bg-input border border-border rounded-md"
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    默认: 60 (秒)
+                  </p>
+                </div>
+
+                <div className="bg-muted/50 p-4 rounded-lg">
+                  <h4 className="font-medium mb-2">限流示例</h4>
+                  <div className="text-sm text-muted-foreground space-y-1">
+                    <p>当前配置: 每分钟最多 100 次请求</p>
+                    <p>超出限制将返回 429 错误</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Application Configuration */}
+          <TabsContent value="app">
+            <Card>
+              <CardHeader>
+                <CardTitle>应用配置</CardTitle>
+                <CardDescription>配置应用基本信息和安全设置</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div>
+                  <label className="text-sm font-medium mb-2 block">应用名称</label>
+                  <input
+                    type="text"
+                    value={config.appName}
+                    onChange={(e) => setConfig({ ...config, appName: e.target.value })}
+                    placeholder="AI公众号自动写作助手 Pro"
+                    className="w-full px-3 py-2 bg-input border border-border rounded-md"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium mb-2 block">应用版本</label>
+                  <input
+                    type="text"
+                    value={config.appVersion}
+                    onChange={(e) => setConfig({ ...config, appVersion: e.target.value })}
+                    placeholder="1.0.0"
+                    className="w-full px-3 py-2 bg-input border border-border rounded-md"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium mb-2 flex items-center">
+                    应用密钥
+                    <Badge variant="destructive" className="ml-2 text-xs">重要</Badge>
+                  </label>
+                  {renderSecretInput(
+                    '',
+                    config.secretKey,
+                    (value) => setConfig({ ...config, secretKey: value }),
+                    '生成一个强随机密钥',
+                    'secretKey'
+                  )}
+                  <p className="text-xs text-muted-foreground mt-2">
+                    用于加密和会话管理，建议使用至少 32 位的随机字符串
+                  </p>
+                </div>
+
+                <Separator />
+
+                <div>
+                  <label className="text-sm font-medium mb-2 block">上传目录</label>
+                  <input
+                    type="text"
+                    value={config.uploadDir}
+                    onChange={(e) => setConfig({ ...config, uploadDir: e.target.value })}
+                    placeholder="uploads"
+                    className="w-full px-3 py-2 bg-input border border-border rounded-md"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium mb-2 block">临时目录</label>
+                  <input
+                    type="text"
+                    value={config.tempDir}
+                    onChange={(e) => setConfig({ ...config, tempDir: e.target.value })}
+                    placeholder="temp"
+                    className="w-full px-3 py-2 bg-input border border-border rounded-md"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium mb-2 block">最大上传大小 (字节)</label>
+                  <input
+                    type="number"
+                    value={config.maxUploadSize}
+                    onChange={(e) => setConfig({ ...config, maxUploadSize: parseInt(e.target.value) })}
+                    className="w-full px-3 py-2 bg-input border border-border rounded-md"
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    默认: 20971520 (20MB)
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Task Configuration */}
+          <TabsContent value="task">
+            <Card>
+              <CardHeader>
+                <CardTitle>任务配置</CardTitle>
+                <CardDescription>配置异步任务和调度器参数</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div>
+                  <label className="text-sm font-medium mb-2 block">Celery 消息队列地址</label>
+                  <input
+                    type="text"
+                    value={config.celeryBrokerUrl}
+                    onChange={(e) => setConfig({ ...config, celeryBrokerUrl: e.target.value })}
+                    placeholder="redis://localhost:6379/1"
+                    className="w-full px-3 py-2 bg-input border border-border rounded-md font-mono text-sm"
+                  />
+                  <p className="text-xs text-muted-foreground mt-2">
+                    用于任务消息传递，建议使用 Redis 数据库编号 1
+                  </p>
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium mb-2 block">Celery 结果存储地址</label>
+                  <input
+                    type="text"
+                    value={config.celeryResultBackend}
+                    onChange={(e) => setConfig({ ...config, celeryResultBackend: e.target.value })}
+                    placeholder="redis://localhost:6379/1"
+                    className="w-full px-3 py-2 bg-input border border-border rounded-md font-mono text-sm"
+                  />
+                  <p className="text-xs text-muted-foreground mt-2">
+                    用于存储任务执行结果
+                  </p>
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium mb-2 block">任务超时时间 (秒)</label>
+                  <input
+                    type="number"
+                    value={config.taskTimeout}
+                    onChange={(e) => setConfig({ ...config, taskTimeout: parseInt(e.target.value) })}
+                    className="w-full px-3 py-2 bg-input border border-border rounded-md"
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    默认: 3600 (1小时)
+                  </p>
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium mb-2 block">最大重试次数</label>
+                  <input
+                    type="number"
+                    value={config.taskMaxRetries}
+                    onChange={(e) => setConfig({ ...config, taskMaxRetries: parseInt(e.target.value) })}
+                    className="w-full px-3 py-2 bg-input border border-border rounded-md"
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    默认: 3 次
+                  </p>
+                </div>
+
+                <div className="bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 p-4 rounded-lg">
+                  <div className="flex items-start space-x-3">
+                    <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400 mt-0.5" />
+                    <div>
+                      <h4 className="font-medium text-green-900 dark:text-green-100 mb-1">提示</h4>
+                      <p className="text-sm text-green-700 dark:text-green-300">如果你使用 Docker 部署，Celery 配置通常使用默认值即可。</p>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
           {/* Features Configuration */}
           <TabsContent value="features">
             <Card>
@@ -521,10 +996,13 @@ export default function SettingsPage() {
                 <CardDescription>启用或禁用系统功能</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="flex items-center justify-between p-4 border rounded-lg">
-                  <div>
-                    <h4 className="font-medium">深度研究</h4>
-                    <p className="text-sm text-muted-foreground">启用联网搜索,增强内容深度</p>
+                <div className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors">
+                  <div className="flex-1">
+                    <div className="flex items-center space-x-2">
+                      <h4 className="font-medium">深度研究</h4>
+                      <Badge variant="secondary" className="text-xs">高级</Badge>
+                    </div>
+                    <p className="text-sm text-muted-foreground mt-1">启用联网搜索,增强内容深度和准确性</p>
                   </div>
                   <input
                     type="checkbox"
@@ -534,10 +1012,13 @@ export default function SettingsPage() {
                   />
                 </div>
 
-                <div className="flex items-center justify-between p-4 border rounded-lg">
-                  <div>
-                    <h4 className="font-medium">AI 图片生成</h4>
-                    <p className="text-sm text-muted-foreground">自动生成封面图和技术配图</p>
+                <div className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors">
+                  <div className="flex-1">
+                    <div className="flex items-center space-x-2">
+                      <h4 className="font-medium">AI 图片生成</h4>
+                      <Badge variant="secondary" className="text-xs">推荐</Badge>
+                    </div>
+                    <p className="text-sm text-muted-foreground mt-1">自动生成封面图和技术配图</p>
                   </div>
                   <input
                     type="checkbox"
@@ -547,10 +1028,10 @@ export default function SettingsPage() {
                   />
                 </div>
 
-                <div className="flex items-center justify-between p-4 border rounded-lg">
-                  <div>
+                <div className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors">
+                  <div className="flex-1">
                     <h4 className="font-medium">Markdown 编辑器</h4>
-                    <p className="text-sm text-muted-foreground">使用 Markdown 编辑器编写内容</p>
+                    <p className="text-sm text-muted-foreground mt-1">使用 Markdown 编辑器编写内容</p>
                   </div>
                   <input
                     type="checkbox"
