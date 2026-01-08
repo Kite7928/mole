@@ -5,7 +5,9 @@ from functools import wraps
 from typing import Callable, Any
 import time
 import asyncio
-from ..logger import logger
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def time_it(func: Callable) -> Callable:
