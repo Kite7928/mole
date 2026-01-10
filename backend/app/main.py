@@ -7,7 +7,7 @@ import time
 from .core.config import settings
 from .core.logger import logger
 from .core.database import init_db, close_db
-from .api import articles, news, wechat, tasks, health, statistics, integrations, auth
+from .api import articles, news, wechat, tasks, health, statistics, integrations, auth, unified_ai, integrations, auth
 
 
 @asynccontextmanager
@@ -94,6 +94,7 @@ app.include_router(wechat.router, prefix="/api/wechat", tags=["WeChat"])
 app.include_router(tasks.router, prefix="/api/tasks", tags=["Tasks"])
 app.include_router(statistics.router, prefix="/api/statistics", tags=["Statistics"])
 app.include_router(integrations.router, prefix="/api/integrations", tags=["Integrations"])
+app.include_router(unified_ai.router, prefix="/api/ai", tags=["Unified AI"])
 
 
 # Root endpoint

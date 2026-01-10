@@ -35,21 +35,64 @@ class Settings(BaseSettings):
     OPENAI_MAX_TOKENS: int = 4000
     OPENAI_TEMPERATURE: float = 0.7
 
-    # Alternative AI Models
+    # DeepSeek
     DEEPSEEK_API_KEY: Optional[str] = None
     DEEPSEEK_BASE_URL: str = "https://api.deepseek.com/v1"
     DEEPSEEK_MODEL: str = "deepseek-chat"
 
+    # Anthropic Claude
     CLAUDE_API_KEY: Optional[str] = None
     CLAUDE_BASE_URL: str = "https://api.anthropic.com/v1"
     CLAUDE_MODEL: str = "claude-3-opus-20240229"
 
+    # Google Gemini
     GEMINI_API_KEY: Optional[str] = None
     GEMINI_MODEL: str = "gemini-pro"
 
-    # Domestic AI Models (国内AI模型)
-    QWEN_API_KEY: Optional[str] = None
-    QWEN_MODEL: str = "qwen-max"
+    # Ollama (本地部署)
+    OLLAMA_BASE_URL: str = "http://localhost:11434"
+    OLLAMA_MODEL: str = "llama2"
+
+    # 火山引擎 (字节跳动)
+    VOLCENGINE_API_KEY: Optional[str] = None
+    VOLCENGINE_BASE_URL: str = "https://ark.cn-beijing.volces.com/api/v3"
+    VOLCENGINE_MODEL: str = "ep-20240110134838-xxxxx"
+
+    # 阿里云百炼
+    ALIBABA_BAILIAN_API_KEY: Optional[str] = None
+    ALIBABA_BAILIAN_BASE_URL: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    ALIBABA_BAILIAN_MODEL: str = "qwen-max"
+
+    # Moonshot Kimi
+    MOONSHOT_API_KEY: Optional[str] = None
+    MOONSHOT_BASE_URL: str = "https://api.moonshot.cn/v1"
+    MOONSHOT_MODEL: str = "moonshot-v1-8k"
+
+    # 硅基流动
+    SILICONFLOW_API_KEY: Optional[str] = None
+    SILICONFLOW_BASE_URL: str = "https://api.siliconflow.cn/v1"
+    SILICONFLOW_MODEL: str = "Qwen/Qwen2.5-7B-Instruct"
+
+    # OpenRouter
+    OPENROUTER_API_KEY: Optional[str] = None
+    OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
+    OPENROUTER_MODEL: str = "openai/gpt-4-turbo"
+
+    # AI轮询策略配置
+    AI_ROTATION_STRATEGY: str = "sequential"  # "sequential" or "random"
+    AI_ENABLED_PROVIDERS: list = [
+        "openai",
+        "deepseek",
+        "claude",
+        "gemini",
+        "qwen",
+        "moonshot",
+        "ollama",
+        "volcengine",
+        "alibaba_bailian",
+        "siliconflow",
+        "openrouter"
+    ]
 
     # Image Generation API (图片生成API)
     DALL_E_API_KEY: Optional[str] = None

@@ -13,7 +13,8 @@ import {
   Menu,
   X,
   Sparkles,
-  Zap
+  Zap,
+  Bot
 } from 'lucide-react'
 import { useState } from 'react'
 
@@ -24,7 +25,7 @@ const navigation = [
   { name: '热点监控', href: '/hotspots', icon: Flame },
   { name: '数据统计', href: '/statistics', icon: BarChart3 },
   { name: '微信发布', href: '/editor', icon: Send },
-  { name: 'API集成', href: '/integrations', icon: Zap },
+  { name: 'AI提供商', href: '/ai-providers', icon: Bot },
   { name: '系统设置', href: '/settings', icon: Settings },
 ]
 
