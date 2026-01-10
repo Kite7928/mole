@@ -1,346 +1,369 @@
 'use client'
 
-import { useState } from 'react'
-import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Badge } from '@/components/ui/badge'
-import { Progress } from '@/components/ui/progress'
-import { Separator } from '@/components/ui/separator'
-import {
-  BookOpen,
-  Zap,
-  TrendingUp,
-  Clock,
-  CheckCircle2,
-  AlertCircle,
-  Settings,
-  Plus,
+import { useState, useEffect } from 'react'
+import { 
+  FileText, 
+  TrendingUp, 
+  Clock, 
+  CheckCircle, 
   ArrowRight,
   Sparkles,
+  Flame,
   BarChart3,
-  Calendar,
-  Users,
-  Eye,
-  Heart,
-  Share2,
+  Loader2,
+  User,
+  Calendar
 } from 'lucide-react'
+import Link from 'next/link'
+import { useStore } from '@/lib/store'
 
-export default function DashboardPage() {
-  const [activeTab, setActiveTab] = useState('overview')
+export default function Dashboard() {
+  const { statistics, articles, hotNews, refreshStatistics, refreshHotNews, addNotification, isLoading } = useStore()
+  const [isRefreshing, setIsRefreshing] = useState(false)
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true)
+    try {
+      await Promise.all([refreshStatistics(), refreshHotNews()])
+      addNotification('数据已刷新', 'success')
+    } catch (error) {
+      addNotification('刷新失败', 'error')
+    } finally {
+      setIsRefreshing(false)
+    }
+  }
+
+  const handleQuickAction = (action: string) => {
+    addNotification(`正在前往${action}...`, 'info')
+  }
+
+  const getStatusBadge = (status: string) => {
+    const statusConfig = {
+      published: { label: '已发布', className: 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/20' },
+      draft: { label: '草稿', className: 'bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-500/10 dark:text-amber-400 dark:border-amber-500/20' },
+      generating: { label: '生成中', className: 'bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-500/10 dark:text-blue-400 dark:border-blue-500/20' },
+    }
+    const config = statusConfig[status as keyof typeof statusConfig]
+    return (
+      <span className={`px-2.5 py-1 rounded-full text-xs font-semibold border ${config?.className}`}>
+        {config?.label}
+      </span>
+    )
+  }
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="space-y-6">
       {/* Header */}
-      <header className="border-b border-border">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary">
-                <BookOpen className="h-6 w-6 text-primary-foreground" />
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold art-gradient-text">仪表板</h1>
+          <p className="text-slate-600 dark:text-slate-400 mt-1">欢迎回来，开始今天的创作之旅</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors text-slate-700 dark:text-slate-300 disabled:opacity-50"
+          >
+            {isRefreshing ? (
+              <>
+                <Loader2 size={20} className="animate-spin" />
+                刷新中...
+              </>
+            ) : (
+              <>
+                <TrendingUp size={20} />
+                刷新数据
+              </>
+            )}
+          </button>
+          <Link
+            href="/articles/create"
+            onClick={() => handleQuickAction('AI写作')}
+            className="flex items-center justify-center gap-2 px-6 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl hover:shadow-lg hover:shadow-indigo-500/30 transition-all duration-300 font-medium"
+          >
+            <Sparkles size={20} />
+            开始创作
+          </Link>
+        </div>
+      </div>
+
+      {/* Stats Grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard
+          title="总文章数"
+          value={statistics.totalArticles}
+          icon={<FileText size={24} />}
+          trend={`+${statistics.growthRate.read}%`}
+          trendUp
+          color="blue"
+        />
+        <StatCard
+          title="今日发布"
+          value={statistics.publishedToday}
+          icon={<CheckCircle size={24} />}
+          trend="+3"
+          trendUp
+          color="emerald"
+        />
+        <StatCard
+          title="总阅读量"
+          value={statistics.totalReads.toLocaleString()}
+          icon={<TrendingUp size={24} />}
+          trend={`+${statistics.growthRate.read}%`}
+          trendUp
+          color="purple"
+        />
+        <StatCard
+          title="平均阅读时间"
+          value={`${statistics.avgReadTime}min`}
+          icon={<Clock size={24} />}
+          trend="+0.5min"
+          trendUp
+          color="orange"
+        />
+      </div>
+
+      {/* Main Content Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Recent Articles */}
+        <div className="lg:col-span-2 bg-white/95 dark:bg-slate-800/95 backdrop-blur-xl rounded-2xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-xl font-semibold text-slate-900 dark:text-white">最近文章</h2>
+            <Link
+              href="/articles"
+              className="flex items-center gap-1 text-sm text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 transition-colors font-medium"
+            >
+              查看全部 <ArrowRight size={16} />
+            </Link>
+          </div>
+          <div className="space-y-3">
+            {articles.slice(0, 5).map((article) => (
+              <div
+                key={article.id}
+                className="flex items-start gap-4 p-4 rounded-xl bg-slate-50 dark:bg-slate-700/50 hover:bg-slate-100 dark:hover:bg-slate-700 transition-all duration-300 border border-slate-200 dark:border-slate-600 hover:border-indigo-300 dark:hover:border-indigo-500/50 cursor-pointer group"
+                onClick={() => {
+                  addNotification(`查看文章: ${article.title}`, 'info')
+                }}
+              >
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-2">
+                    {getStatusBadge(article.status)}
+                    <span className="text-xs text-slate-500 dark:text-slate-400">
+                      {article.publishedAt || article.createdAt}
+                    </span>
+                  </div>
+                  <h3 className="font-medium mb-2 truncate text-slate-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
+                    {article.title}
+                  </h3>
+                  <div className="flex items-center gap-4 text-sm text-slate-600 dark:text-slate-400">
+                    <span className="flex items-center gap-1">
+                      <TrendingUp size={16} className="text-indigo-500" />
+                      {article.readCount.toLocaleString()} 阅读
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <CheckCircle size={16} className="text-emerald-500" />
+                      {article.likeCount} 点赞
+                    </span>
+                  </div>
+                </div>
               </div>
-              <div>
-                <h1 className="text-xl font-bold">AI公众号自动写作助手 Pro</h1>
-                <p className="text-sm text-muted-foreground">智能内容生成与发布系统</p>
-              </div>
-            </div>
-            <div className="flex items-center space-x-2">
-              <Button variant="outline" size="sm" asChild>
-                <a href="/settings">
-                  <Settings className="mr-2 h-4 w-4" />
-                  设置
-                </a>
-              </Button>
-              <Button size="sm" asChild>
-                <a href="/articles/create">
-                  <Plus className="mr-2 h-4 w-4" />
-                  新建文章
-                </a>
-              </Button>
-            </div>
+            ))}
           </div>
         </div>
-      </header>
 
-      {/* Main Content */}
-      <main className="container mx-auto px-4 py-6">
-        {/* Quick Stats */}
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-6">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">今日发布</CardTitle>
-              <BookOpen className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">24</div>
-              <p className="text-xs text-muted-foreground">+12% 较昨日</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">总阅读量</CardTitle>
-              <Eye className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">12.5K</div>
-              <p className="text-xs text-muted-foreground">+8% 较昨日</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">收藏数</CardTitle>
-              <Heart className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">890</div>
-              <p className="text-xs text-muted-foreground">+15% 较昨日</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">成功率</CardTitle>
-              <CheckCircle2 className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">95%</div>
-              <p className="text-xs text-muted-foreground">稳定运行</p>
-            </CardContent>
-          </Card>
+        {/* Hot News */}
+        <div className="bg-white/95 dark:bg-slate-800/95 backdrop-blur-xl rounded-2xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-xl font-semibold text-slate-900 dark:text-white">热点新闻</h2>
+            <Link
+              href="/hotspots"
+              className="flex items-center gap-1 text-sm text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 transition-colors font-medium"
+            >
+              查看全部 <ArrowRight size={16} />
+            </Link>
+          </div>
+          <div className="space-y-3">
+            {hotNews.slice(0, 3).map((news) => (
+              <div
+                key={news.id}
+                className="p-4 rounded-xl bg-slate-50 dark:bg-slate-700/50 hover:bg-slate-100 dark:hover:bg-slate-700 transition-all duration-300 border border-slate-200 dark:border-slate-600 hover:border-orange-300 dark:hover:border-orange-500/50 cursor-pointer group"
+                onClick={() => {
+                  addNotification(`查看热点: ${news.title}`, 'info')
+                }}
+              >
+                <div className="flex items-center gap-2 mb-2">
+                  <Flame size={16} className="text-orange-500" />
+                  <span className="text-sm font-semibold text-orange-600 dark:text-orange-400">
+                    热度: {news.hotScore}
+                  </span>
+                </div>
+                <h3 className="font-medium mb-2 text-slate-900 dark:text-white group-hover:text-orange-600 dark:group-hover:text-orange-400 transition-colors line-clamp-2">
+                  {news.title}
+                </h3>
+                <div className="flex items-center justify-between text-sm text-slate-500 dark:text-slate-400">
+                  <span className="flex items-center gap-1">
+                    <User size={14} />
+                    {news.sourceName}
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <Calendar size={14} />
+                    {news.publishedAt}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
+      </div>
 
-        {/* Main Tabs */}
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-          <TabsList className="grid w-full grid-cols-5">
-            <TabsTrigger value="overview">仪表板</TabsTrigger>
-            <TabsTrigger value="articles">文章</TabsTrigger>
-            <TabsTrigger value="hotspots" asChild>
-                <a href="/hotspots">热点</a>
-              </TabsTrigger>
-            <TabsTrigger value="statistics">统计</TabsTrigger>
-            <TabsTrigger value="settings" asChild>
-                <a href="/settings">设置</a>
-              </TabsTrigger>
-          </TabsList>
-
-          {/* Overview Tab */}
-          <TabsContent value="overview" className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2">
-              {/* Quick Actions */}
-              <Card>
-                <CardHeader>
-                  <CardTitle>快速操作</CardTitle>
-                  <CardDescription>常用功能快捷入口</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <Button className="w-full justify-start" variant="default" asChild>
-                    <a href="/articles/create">
-                      <Zap className="mr-2 h-4 w-4" />
-                      一键生成文章
-                    </a>
-                  </Button>
-                  <Button className="w-full justify-start" variant="outline" asChild>
-                    <a href="/hotspots">
-                      <TrendingUp className="mr-2 h-4 w-4" />
-                      查看热点趋势
-                    </a>
-                  </Button>
-                  <Button className="w-full justify-start" variant="outline">
-                    <Calendar className="mr-2 h-4 w-4" />
-                    定时任务管理
-                  </Button>
-                  <Button className="w-full justify-start" variant="outline" asChild>
-                    <a href="/statistics">
-                      <BarChart3 className="mr-2 h-4 w-4" />
-                      数据统计分析
-                    </a>
-                  </Button>
-                </CardContent>
-              </Card>
-
-              {/* Real-time Tasks */}
-              <Card>
-                <CardHeader>
-                  <CardTitle>实时任务</CardTitle>
-                  <CardDescription>正在进行的任务</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="flex items-center">
-                        <Sparkles className="mr-2 h-4 w-4 text-primary" />
-                        正在生成文章
-                      </span>
-                      <span className="text-muted-foreground">45%</span>
-                    </div>
-                    <Progress value={45} />
-                  </div>
-
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="flex items-center">
-                        <Eye className="mr-2 h-4 w-4 text-blue-500" />
-                        上传封面图
-                      </span>
-                      <span className="text-muted-foreground">78%</span>
-                    </div>
-                    <Progress value={78} />
-                  </div>
-
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="flex items-center">
-                        <Clock className="mr-2 h-4 w-4 text-orange-500" />
-                        待发布任务
-                      </span>
-                      <Badge variant="secondary">3篇</Badge>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* Hot Topics */}
-            <Card>
-              <CardHeader>
-                <CardTitle>最新热点</CardTitle>
-                <CardDescription>实时更新的AI科技热点</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  {[
-                    {
-                      title: '研究发现：YouTube向新用户展示的视频中超20%是"AI垃圾内容"',
-                      source: 'IT之家',
-                      time: '10分钟前',
-                      hot: 9.8
-                    },
-                    {
-                      title: '马斯克预测：AI和机器人将彻底消除贫困与饥饿',
-                      source: '36氪',
-                      time: '25分钟前',
-                      hot: 8.5
-                    },
-                    {
-                      title: '苹果Vision Pro降价30%，销量激增',
-                      source: 'IT之家',
-                      time: '1小时前',
-                      hot: 7.2
-                    },
-                  ].map((item, index) => (
-                    <div key={index} className="flex items-start justify-between space-x-4 p-3 rounded-lg hover:bg-muted/50 transition-colors">
-                      <div className="flex-1 space-y-1">
-                        <p className="text-sm font-medium leading-none">{item.title}</p>
-                        <div className="flex items-center space-x-2 text-xs text-muted-foreground">
-                          <span>{item.source}</span>
-                          <span>•</span>
-                          <span>{item.time}</span>
-                        </div>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <Badge variant="secondary">热度 {item.hot}</Badge>
-                        <Button size="sm" variant="ghost" asChild>
-                          <a href="/hotspots">
-                            <ArrowRight className="h-4 w-4" />
-                          </a>
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          {/* Articles Tab */}
-          <TabsContent value="articles">
-            <Card>
-              <CardHeader>
-                <CardTitle>文章管理</CardTitle>
-                <CardDescription>管理和查看所有生成的文章</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="text-center py-12">
-                  <BookOpen className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-                  <h3 className="text-lg font-semibold mb-2">暂无文章</h3>
-                  <p className="text-muted-foreground mb-4">开始创建你的第一篇文章吧</p>
-                  <Button asChild>
-                    <a href="/articles/create">
-                      <Plus className="mr-2 h-4 w-4" />
-                      创建文章
-                    </a>
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          {/* Hotspots Tab */}
-          <TabsContent value="hotspots">
-            <Card>
-              <CardHeader>
-                <CardTitle>热点监控</CardTitle>
-                <CardDescription>实时监控各大平台热点</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="text-center py-12">
-                  <TrendingUp className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-                  <h3 className="text-lg font-semibold mb-2">热点加载中</h3>
-                  <p className="text-muted-foreground mb-4">正在获取最新热点信息...</p>
-                  <Button asChild>
-                    <a href="/hotspots">
-                      <TrendingUp className="mr-2 h-4 w-4" />
-                      查看所有热点
-                    </a>
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          {/* Statistics Tab */}
-          <TabsContent value="statistics">
-            <Card>
-              <CardHeader>
-                <CardTitle>数据统计</CardTitle>
-                <CardDescription>查看详细的数据分析</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="text-center py-12">
-                  <BarChart3 className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-                  <h3 className="text-lg font-semibold mb-2">统计数据</h3>
-                  <p className="text-muted-foreground">数据统计功能即将上线</p>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          {/* Settings Tab */}
-          <TabsContent value="settings">
-            <Card>
-              <CardHeader>
-                <CardTitle>系统设置</CardTitle>
-                <CardDescription>配置系统参数和API</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="text-center py-12">
-                  <Settings className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-                  <h3 className="text-lg font-semibold mb-2">系统设置</h3>
-                  <p className="text-muted-foreground mb-4">配置 AI 模型、微信公众号等参数</p>
-                  <Button asChild>
-                    <a href="/settings">
-                      <Settings className="mr-2 h-4 w-4" />
-                      打开设置页面
-                    </a>
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
-      </main>
+      {/* Quick Actions */}
+      <div className="bg-white/95 dark:bg-slate-800/95 backdrop-blur-xl rounded-2xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
+        <h2 className="text-xl font-semibold text-slate-900 dark:text-white mb-6">快捷操作</h2>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <QuickActionCard
+            title="创建新文章"
+            description="使用AI快速生成高质量内容"
+            icon={<Sparkles size={32} />}
+            href="/articles/create"
+            onClick={() => handleQuickAction('创建新文章')}
+            color="indigo"
+          />
+          <QuickActionCard
+            title="查看热点"
+            description="实时监控科技圈热点话题"
+            icon={<Flame size={32} />}
+            href="/hotspots"
+            onClick={() => handleQuickAction('查看热点')}
+            color="orange"
+          />
+          <QuickActionCard
+            title="数据统计"
+            description="查看文章表现和数据趋势"
+            icon={<BarChart3 size={32} />}
+            href="/statistics"
+            onClick={() => handleQuickAction('数据统计')}
+            color="emerald"
+          />
+        </div>
+      </div>
     </div>
+  )
+}
+
+function StatCard({ 
+  title, 
+  value, 
+  icon, 
+  trend, 
+  trendUp,
+  color
+}: { 
+  title: string
+  value: string | number
+  icon: React.ReactNode
+  trend: string
+  trendUp: boolean
+  color: 'blue' | 'emerald' | 'purple' | 'orange'
+}) {
+  const colorConfig = {
+    blue: {
+      bg: 'bg-blue-100 dark:bg-blue-500/10',
+      text: 'text-blue-600 dark:text-blue-400',
+      iconBg: 'bg-gradient-to-br from-blue-500/20 to-blue-600/20 dark:from-blue-500/10 dark:to-blue-600/10',
+      iconText: 'text-blue-600 dark:text-blue-400'
+    },
+    emerald: {
+      bg: 'bg-emerald-100 dark:bg-emerald-500/10',
+      text: 'text-emerald-600 dark:text-emerald-400',
+      iconBg: 'bg-gradient-to-br from-emerald-500/20 to-emerald-600/20 dark:from-emerald-500/10 dark:to-emerald-600/10',
+      iconText: 'text-emerald-600 dark:text-emerald-400'
+    },
+    purple: {
+      bg: 'bg-purple-100 dark:bg-purple-500/10',
+      text: 'text-purple-600 dark:text-purple-400',
+      iconBg: 'bg-gradient-to-br from-purple-500/20 to-purple-600/20 dark:from-purple-500/10 dark:to-purple-600/10',
+      iconText: 'text-purple-600 dark:text-purple-400'
+    },
+    orange: {
+      bg: 'bg-orange-100 dark:bg-orange-500/10',
+      text: 'text-orange-600 dark:text-orange-400',
+      iconBg: 'bg-gradient-to-br from-orange-500/20 to-orange-600/20 dark:from-orange-500/10 dark:to-orange-600/10',
+      iconText: 'text-orange-600 dark:text-orange-400'
+    }
+  }
+
+  const config = colorConfig[color]
+
+  return (
+    <div className="bg-white/95 dark:bg-slate-800/95 backdrop-blur-xl rounded-2xl p-5 border border-slate-200 dark:border-slate-700 shadow-sm hover:shadow-lg hover:shadow-indigo-500/10 transition-all duration-300 hover:-translate-y-1">
+      <div className="flex items-start justify-between mb-4">
+        <div className={`p-2.5 rounded-xl ${config.iconBg} ${config.iconText}`}>
+          {icon}
+        </div>
+        <span className={`text-sm font-semibold px-2.5 py-1 rounded-full ${trendUp ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400' : 'bg-red-100 text-red-700 dark:bg-red-500/10 dark:text-red-400'}`}>
+          {trend}
+        </span>
+      </div>
+      <p className="text-2xl font-bold mb-1 text-slate-900 dark:text-white">{value}</p>
+      <p className="text-sm text-slate-600 dark:text-slate-400">{title}</p>
+    </div>
+  )
+}
+
+function QuickActionCard({
+  title,
+  description,
+  icon,
+  href,
+  onClick,
+  color
+}: {
+  title: string
+  description: string
+  icon: React.ReactNode
+  href: string
+  onClick: () => void
+  color: 'indigo' | 'orange' | 'emerald'
+}) {
+  const colorConfig = {
+    indigo: {
+      bg: 'bg-indigo-100 dark:bg-indigo-500/10',
+      text: 'text-indigo-600 dark:text-indigo-400',
+      hoverBg: 'hover:from-indigo-500/30 hover:to-purple-500/30',
+      hoverText: 'group-hover:text-indigo-700 dark:group-hover:text-indigo-300'
+    },
+    orange: {
+      bg: 'bg-orange-100 dark:bg-orange-500/10',
+      text: 'text-orange-600 dark:text-orange-400',
+      hoverBg: 'hover:from-orange-500/30 hover:to-red-500/30',
+      hoverText: 'group-hover:text-orange-700 dark:group-hover:text-orange-300'
+    },
+    emerald: {
+      bg: 'bg-emerald-100 dark:bg-emerald-500/10',
+      text: 'text-emerald-600 dark:text-emerald-400',
+      hoverBg: 'hover:from-emerald-500/30 hover:to-teal-500/30',
+      hoverText: 'group-hover:text-emerald-700 dark:group-hover:text-emerald-300'
+    }
+  }
+
+  const config = colorConfig[color]
+
+  return (
+    <Link
+      href={href}
+      onClick={onClick}
+      className="flex flex-col items-center gap-4 p-6 rounded-xl bg-slate-50 dark:bg-slate-700/50 hover:bg-slate-100 dark:hover:bg-slate-700 transition-all duration-300 border border-slate-200 dark:border-slate-600 hover:border-indigo-300 dark:hover:border-indigo-500/50 group"
+    >
+      <div className={`p-4 rounded-xl bg-gradient-to-br ${config.bg} ${config.text} transition-all duration-300 ${config.hoverBg}`}>
+        {icon}
+      </div>
+      <div className="text-center">
+        <h3 className="font-semibold mb-1 text-slate-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
+          {title}
+        </h3>
+        <p className="text-sm text-slate-600 dark:text-slate-400">{description}</p>
+      </div>
+    </Link>
   )
 }

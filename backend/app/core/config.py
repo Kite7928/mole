@@ -43,6 +43,41 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: Optional[str] = None
     GEMINI_MODEL: str = "gemini-pro"
 
+    # Domestic AI Models (国内AI模型)
+    QWEN_API_KEY: Optional[str] = None
+    QWEN_MODEL: str = "qwen-max"
+
+    # Image Generation API (图片生成API)
+    DALL_E_API_KEY: Optional[str] = None
+    DALL_E_MODEL: str = "dall-e-3"
+    DALL_E_SIZE: str = "1024x1024"
+    DALL_E_QUALITY: str = "standard"
+
+    MIDJOURNEY_API_KEY: Optional[str] = None
+    MIDJOURNEY_BASE_URL: str = "https://api.midjourney.com/v1"
+
+    STABLE_DIFFUSION_API_KEY: Optional[str] = None
+    STABLE_DIFFUSION_BASE_URL: str = "https://api.stability.ai/v1"
+    STABLE_DIFFUSION_MODEL: str = "stable-diffusion-xl-1024-v1-0"
+
+    # Data Analysis API (数据分析API)
+    BAIDU_INDEX_API_KEY: Optional[str] = None
+    BAIDU_INDEX_SECRET: Optional[str] = None
+
+    WECHAT_INDEX_API_KEY: Optional[str] = None
+    WECHAT_INDEX_SECRET: Optional[str] = None
+
+    WEIBO_API_KEY: Optional[str] = None
+    WEIBO_API_SECRET: Optional[str] = None
+    WEIBO_REDIRECT_URI: Optional[str] = None
+
+    # GitHub API
+    GITHUB_TOKEN: Optional[str] = None
+    GITHUB_API_BASE_URL: str = "https://api.github.com"
+    GITHUB_WEBHOOK_SECRET: Optional[str] = None
+    GITHUB_REPO_OWNER: Optional[str] = None
+    GITHUB_REPO_NAME: Optional[str] = None
+
     # WeChat Configuration
     WECHAT_APP_ID: Optional[str] = None
     WECHAT_APP_SECRET: Optional[str] = None

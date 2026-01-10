@@ -1,6 +1,23 @@
 # AI公众号自动写作助手 Pro
 
+[![CI/CD](https://github.com/Kite7928/mole/actions/workflows/ci.yml/badge.svg)](https://github.com/Kite7928/mole/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/Kite7928/mole/pulls)
+
 一个基于AI的智能微信公众号内容生成与发布系统，支持自动选题、智能写作、图片生成和多平台发布。
+
+## 🚀 一键部署
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FKite7928%2Fmole&env=OPENAI_API_KEY,WECHAT_APP_ID,WECHAT_APP_SECRET,DATABASE_URL,REDIS_URL,SECRET_KEY&envDescription=所需的环境变量配置&envLink=https%3A%2F%2Fgithub.com%2FKite7928%2Fmole%2Fblob%2Fmain%2F.env.example&project-name=wechat-ai-writer&repository-name=wechat-ai-writer)
+[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/new/template?template=https%3A%2F%2Fgithub.com%2FKite7928%2Fmole)
+
+**点击按钮后自动完成：** Fork 仓库 → 配置环境 → 构建部署 → 以后 git push 自动更新！
+
+📚 **部署文档：**
+- ⚡ [快速开始](./QUICKSTART.md) - 5分钟完成部署
+- 📖 [多平台部署](./DEPLOY.md) - Vercel/Railway/自托管指南
+- 🖥️ [服务器部署](./SERVER-DEPLOY.md) - GitHub 自动部署到服务器
+- 🛠️ [脚本使用指南](./scripts/README.md) - 自动化配置工具
 
 ## 🚀 核心特性
 

@@ -1,574 +1,416 @@
 'use client'
 
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
-import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import { Progress } from '@/components/ui/progress'
-import { Separator } from '@/components/ui/separator'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import {
-  ArrowLeft,
-  Sparkles,
-  Image as ImageIcon,
+import { 
+  Sparkles, 
+  Wand2, 
+  RefreshCw, 
+  Check, 
+  Copy,
+  Save,
   Send,
-  CheckCircle2,
+  ChevronRight,
   Loader2,
-  Settings,
-  BookOpen,
-  Zap,
-  TrendingUp,
+  Smartphone,
+  Edit3,
+  Eye
 } from 'lucide-react'
-import { articlesApi, newsApi, wechatApi } from '@/lib/api'
 
-export default function CreateArticlePage() {
-  const router = useRouter()
-  const [step, setStep] = useState<'topic' | 'title' | 'content' | 'images' | 'preview'>('topic')
-  const [loading, setLoading] = useState(false)
-  const [progress, setProgress] = useState(0)
-
-  // Article data
+export default function ArticleCreate() {
+  const [step, setStep] = useState<'input' | 'titles' | 'content' | 'preview'>('input')
+  const [isGenerating, setIsGenerating] = useState(false)
+  const [selectedTitle, setSelectedTitle] = useState<string | null>(null)
   const [topic, setTopic] = useState('')
-  const [source, setSource] = useState<'manual' | 'hot'>('manual')
-  const [hotNews, setHotNews] = useState<any[]>([])
-  const [selectedNews, setSelectedNews] = useState<any>(null)
-  
-  const [titles, setTitles] = useState<any[]>([])
-  const [selectedTitle, setSelectedTitle] = useState('')
-  
-  const [content, setContent] = useState<any>(null)
-  const [coverImage, setCoverImage] = useState<string>('')
-  
-  const [config, setConfig] = useState({
-    style: 'professional',
-    length: 'medium',
-    enableResearch: false,
-    generateCover: true,
-    aiModel: '',
-  })
+  const [aiModel, setAiModel] = useState('gpt-4')
+  const [generatedTitles, setGeneratedTitles] = useState<any[]>([])
+  const [generatedContent, setGeneratedContent] = useState<any>(null)
+  const [showWechatPreview, setShowWechatPreview] = useState(false)
+  const [editingContent, setEditingContent] = useState('')
 
-  const fetchHotNews = async () => {
-    setLoading(true)
-    try {
-      const data = await newsApi.getHotNews(10)
-      setHotNews(data)
-    } catch (error) {
-      console.error('Failed to fetch hot news:', error)
-    } finally {
-      setLoading(false)
-    }
+  const aiModels = [
+    { id: 'gpt-4', name: 'GPT-4', description: 'OpenAI最强模型', icon: '🧠', borderColor: 'border-blue-400', bgColor: 'bg-blue-50' },
+    { id: 'claude-3.5', name: 'Claude 3.5', description: 'Anthropic长文本专家', icon: '🎭', borderColor: 'border-purple-400', bgColor: 'bg-purple-50' },
+    { id: 'deepseek', name: 'DeepSeek', description: '开源性能王者', icon: '🚀', borderColor: 'border-orange-400', bgColor: 'bg-orange-50' },
+    { id: 'gemini', name: 'Gemini Pro', description: 'Google多模态模型', icon: '✨', borderColor: 'border-green-400', bgColor: 'bg-green-50' },
+  ]
+
+  const writingStyles = [
+    { id: 'deep', name: '深度分析', description: '专业、详细、有深度', color: 'from-blue-500 to-purple-500' },
+    { id: 'simple', name: '简洁明了', description: '通俗易懂、重点突出', color: 'from-green-500 to-emerald-500' },
+    { id: 'popular', name: '通俗易懂', description: '生动有趣、适合大众', color: 'from-orange-500 to-red-500' },
+    { id: 'professional', name: '专业严谨', description: '学术风格、引用权威', color: 'from-indigo-500 to-blue-500' },
+  ]
+
+  const handleGenerateTitles = async () => {
+    setIsGenerating(true)
+    // 模拟AI生成
+    await new Promise(resolve => setTimeout(resolve, 2000))
+    setGeneratedTitles([
+      { id: 1, title: 'GPT-4o发布：AI推理能力的新突破', predictedClickRate: 85 },
+      { id: 2, title: 'DeepSeek-V3：开源模型的新里程碑', predictedClickRate: 78 },
+      { id: 3, title: 'Claude 3.5 Sonnet：长文本处理的王者', predictedClickRate: 72 },
+      { id: 4, title: 'Gemini Pro：谷歌AI的最新答卷', predictedClickRate: 68 },
+      { id: 5, title: '2024年AI大模型发展报告', predictedClickRate: 65 },
+    ])
+    setIsGenerating(false)
+    setStep('titles')
   }
 
-  const selectHotNews = (news: any) => {
-    setSelectedNews(news)
-    setTopic(news.title)
+  const handleSelectTitle = (title: string) => {
+    setSelectedTitle(title)
+    setStep('content')
   }
 
-  const generateTitles = async () => {
-    setLoading(true)
-    setProgress(10)
-    try {
-      const data = await articlesApi.generateTitles(topic, 5, config.aiModel)
-      setTitles(data)
-      setProgress(30)
-    } catch (error) {
-      console.error('Failed to generate titles:', error)
-    } finally {
-      setLoading(false)
-    }
-  }
+  const handleGenerateContent = async () => {
+    setIsGenerating(true)
+    // 模拟生成内容
+    await new Promise(resolve => setTimeout(resolve, 5000))
+    setGeneratedContent({
+      title: selectedTitle,
+      summary: '本文深入分析GPT-4o的技术特性、性能表现和应用场景，帮助读者全面了解这一突破性AI模型。',
+      content: `## 引言
 
-  const generateContent = async () => {
-    setLoading(true)
-    setProgress(40)
-    try {
-      const data = await articlesApi.generateContent({
-        topic,
-        title: selectedTitle,
-        style: config.style,
-        length: config.length,
-        enable_research: config.enableResearch,
-        ai_model: config.aiModel,
-      })
-      setContent(data)
-      setProgress(70)
-      
-      // Generate cover image
-      if (config.generateCover) {
-        const keywords = topic.slice(0, 50)
-        setCoverImage(`https://image.pollinations.ai/prompt/${keywords}?width=1280&height=720&nologo=true`)
-      }
-      setProgress(80)
-    } catch (error) {
-      console.error('Failed to generate content:', error)
-    } finally {
-      setLoading(false)
-    }
-  }
+2024年5月，OpenAI发布了备受期待的GPT-4o模型，在推理能力上实现重大突破。作为GPT系列的最新成员，GPT-4o不仅继承了前代模型的强大语言理解能力，更在逻辑推理、数学计算和代码生成等方面展现出惊人的性能提升。
 
-  const createAndPublish = async () => {
-    setLoading(true)
-    setProgress(90)
-    try {
-      // Create article
-      const article = await articlesApi.createArticle({
-        topic,
-        title: selectedTitle,
-        source: source,
-        style: config.style,
-        length: config.length,
-        enable_research: config.enableResearch,
-        generate_cover: config.generateCover,
-        ai_model: config.aiModel,
-      })
+## GPT-4o的核心技术特性
 
-      // Publish to WeChat
-      const wechatData = await wechatApi.createDraft([{
-        title: selectedTitle,
-        author: 'AI Writer',
-        digest: content?.summary,
-        content: content?.content,
-        thumb_media_id: coverImage,
-      }])
+### 1. 增强的推理引擎
 
-      setProgress(100)
-      
-      setTimeout(() => {
-        alert(`文章创建成功！草稿 ID: ${wechatData.media_id}`)
-        router.push('/')
-      }, 500)
-    } catch (error) {
-      console.error('Failed to create and publish:', error)
-    } finally {
-      setLoading(false)
-    }
-  }
+GPT-4o采用了全新的推理引擎架构，通过多层次的思维链（Chain of Thought）机制，显著提升了复杂问题的解决能力。在处理需要多步骤推理的任务时，GPT-4o能够更准确地分解问题、规划解决路径，并逐步执行验证。
 
-  const handleNext = async () => {
-    setLoading(true)
-    
-    switch (step) {
-      case 'topic':
-        await generateTitles()
-        setStep('title')
-        break
-      case 'title':
-        if (!selectedTitle) {
-          alert('请选择一个标题')
-        } else {
-          await generateContent()
-          setStep('content')
-        }
-        break
-      case 'content':
-        setStep('images')
-        break
-      case 'images':
-        await createAndPublish()
-        break
-    }
-    
-    setLoading(false)
-  }
+### 2. 优化的注意力机制
 
-  const handleBack = () => {
-    switch (step) {
-      case 'title':
-        setStep('topic')
-        break
-      case 'content':
-        setStep('title')
-        break
-      case 'images':
-        setStep('content')
-        break
-    }
+新的注意力机制设计使得模型能够更有效地处理长文本，上下文窗口扩展至128K tokens，同时保持了优秀的性能表现。这使得GPT-4o在处理长文档、代码库分析等任务时具有明显优势。
+
+### 3. 多模态融合能力
+
+GPT-4o在多模态处理方面也取得了显著进展，能够更好地理解和生成图文内容，为未来的应用场景打开了更多可能性。
+
+## 性能表现对比
+
+在多项基准测试中，GPT-4o的表现都超越了前代模型：
+
+- **MMLU**: 89.2% (GPT-4: 86.4%)
+- **HumanEval**: 92.5% (GPT-4: 67.0%)
+- **GSM8K**: 94.8% (GPT-4: 92.0%)
+
+## 应用场景
+
+GPT-4o的强大能力使其在众多领域都有广泛的应用前景：
+
+1. **科研辅助**: 帮助研究人员快速分析文献、生成假设
+2. **教育领域**: 个性化学习辅导、智能答疑
+3. **软件开发**: 代码生成、调试、优化
+4. **内容创作**: 高质量文章、营销文案生成
+
+## 总结
+
+GPT-4o的发布标志着AI技术又迈出了重要一步。其强大的推理能力和多模态融合特性，将为各行各业带来深远的影响。我们有理由相信，随着技术的不断进步，AI将在更多领域发挥更大的价值。`,
+      qualityScore: 87,
+      sources: ['OpenAI官方文档', '学术论文', '技术博客'],
+    })
+    setIsGenerating(false)
+    setStep('preview')
   }
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="max-w-6xl mx-auto space-y-6">
       {/* Header */}
-      <header className="border-b border-border">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <Button variant="ghost" size="sm" onClick={() => router.push('/')}>
-                <ArrowLeft className="h-4 w-4" />
-              </Button>
-              <div>
-                <h1 className="text-xl font-bold">创建文章</h1>
-                <p className="text-sm text-muted-foreground">AI 智能写作助手</p>
-              </div>
-            </div>
-            <Button variant="outline" size="sm">
-              <Settings className="mr-2 h-4 w-4" />
-              配置
-            </Button>
-          </div>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold art-gradient-text">AI写作</h1>
+          <p className="text-slate-600 mt-1">使用AI快速生成高质量内容</p>
         </div>
-      </header>
-
-      {/* Progress */}
-      <div className="border-b border-border">
-        <div className="container mx-auto px-4 py-6">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center space-x-2">
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center ${step === 'topic' || step === 'title' || step === 'content' || step === 'images' ? 'bg-primary' : 'bg-muted'}`}>
-                {step === 'topic' || step === 'title' || step === 'content' || step === 'images' ? <CheckCircle2 className="h-4 w-4 text-primary-foreground" /> : '1'}
-              </div>
-              <div className={`w-16 h-1 ${step === 'title' || step === 'content' || step === 'images' ? 'bg-primary' : 'bg-muted'}`} />
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center ${step === 'title' || step === 'content' || step === 'images' ? 'bg-primary' : 'bg-muted'}`}>
-                {step === 'title' || step === 'content' || step === 'images' ? <CheckCircle2 className="h-4 w-4 text-primary-foreground" /> : '2'}
-              </div>
-              <div className={`w-16 h-1 ${step === 'content' || step === 'images' ? 'bg-primary' : 'bg-muted'}`} />
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center ${step === 'content' || step === 'images' ? 'bg-primary' : 'bg-muted'}`}>
-                {step === 'content' || step === 'images' ? <CheckCircle2 className="h-4 w-4 text-primary-foreground" /> : '3'}
-              </div>
-              <div className={`w-16 h-1 ${step === 'images' ? 'bg-primary' : 'bg-muted'}`} />
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center ${step === 'images' ? 'bg-primary' : 'bg-muted'}`}>
-                {step === 'images' ? <CheckCircle2 className="h-4 w-4 text-primary-foreground" /> : '4'}
-              </div>
-            </div>
-            {loading && <span className="text-sm text-muted-foreground">处理中... {progress}%</span>}
-          </div>
-          {loading && <Progress value={progress} />}
+        <div className="flex items-center gap-2">
+          <button className="flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-300 hover:bg-slate-50 transition-colors text-slate-700">
+            <Save size={20} />
+            保存草稿
+          </button>
+          <button className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl hover:shadow-lg hover:shadow-indigo-500/30 transition-all duration-300">
+            <Send size={20} />
+            直接发布
+          </button>
         </div>
       </div>
 
-      {/* Main Content */}
-      <main className="container mx-auto px-4 py-6">
-        <div className="grid gap-6 lg:grid-cols-3">
-          {/* Left Panel - Steps */}
-          <div className="lg:col-span-2">
-            {step === 'topic' && (
-              <Card>
-                <CardHeader>
-                  <CardTitle>步骤 1: 选择主题</CardTitle>
-                  <CardDescription>选择文章主题或从热点中选择</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <Tabs defaultValue="manual">
-                    <TabsList className="grid w-full grid-cols-2">
-                      <TabsTrigger value="manual" onClick={() => setSource('manual')}>
-                        <BookOpen className="mr-2 h-4 w-4" />
-                        手动输入
-                      </TabsTrigger>
-                      <TabsTrigger value="hot" onClick={() => { setSource('hot'); fetchHotNews() }}>
-                        <TrendingUp className="mr-2 h-4 w-4" />
-                        热点选择
-                      </TabsTrigger>
-                    </TabsList>
+      {/* Progress Steps */}
+      <div className="flex items-center gap-4 p-4 bg-white/95 backdrop-blur-xl rounded-2xl border border-slate-200 shadow-sm">
+        {[
+          { id: 'input', label: '输入主题' },
+          { id: 'titles', label: '选择标题' },
+          { id: 'content', label: '生成内容' },
+          { id: 'preview', label: '预览编辑' },
+        ].map((s, index) => (
+          <div key={s.id} className="flex-1 flex items-center gap-4">
+            <div className={`flex items-center justify-center w-8 h-8 rounded-full ${
+              step === s.id ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-lg shadow-indigo-500/30' :
+              ['input', 'titles', 'content', 'preview'].indexOf(step) > index ? 'bg-emerald-500 text-white' : 'bg-slate-200 text-slate-500'
+            }`}>
+              {['input', 'titles', 'content', 'preview'].indexOf(step) > index ? <Check size={16} /> : index + 1}
+            </div>
+            <span className={`font-medium ${step === s.id ? 'text-indigo-600' : 'text-slate-500'}`}>
+              {s.label}
+            </span>
+            {index < 3 && <ChevronRight size={20} className="text-slate-400" />}
+          </div>
+        ))}
+      </div>
 
-                    <TabsContent value="manual" className="space-y-4">
-                      <div>
-                        <label className="text-sm font-medium mb-2 block">文章主题</label>
-                        <textarea
-                          value={topic}
-                          onChange={(e) => setTopic(e.target.value)}
-                          placeholder="输入你想写的文章主题..."
-                          className="w-full px-3 py-2 bg-input border border-border rounded-md min-h-[100px]"
-                        />
-                      </div>
-                    </TabsContent>
-
-                    <TabsContent value="hot" className="space-y-4">
-                      {loading && hotNews.length === 0 ? (
-                        <div className="text-center py-8">
-                          <Loader2 className="mx-auto h-8 w-8 animate-spin text-muted-foreground mb-2" />
-                          <p className="text-sm text-muted-foreground">正在加载热点...</p>
-                        </div>
-                      ) : (
-                        <div className="space-y-3 max-h-[400px] overflow-y-auto">
-                          {hotNews.map((news, index) => (
-                            <div
-                              key={index}
-                              className={`p-4 rounded-lg border cursor-pointer transition-colors ${
-                                selectedNews?.id === news.id ? 'border-primary bg-primary/10' : 'border-border hover:bg-muted/50'
-                              }`}
-                              onClick={() => selectHotNews(news)}
-                            >
-                              <div className="flex items-start justify-between">
-                                <div className="flex-1">
-                                  <h4 className="text-sm font-medium mb-1">{news.title}</h4>
-                                  <div className="flex items-center space-x-2 text-xs text-muted-foreground">
-                                    <span>{news.source_name}</span>
-                                    <span>•</span>
-                                    <Badge variant="secondary">热度 {news.hot_score.toFixed(1)}</Badge>
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </TabsContent>
-                  </Tabs>
-
-                  <div className="mt-6 space-y-4">
-                    <Separator />
-                    <div>
-                      <label className="text-sm font-medium mb-2 block">写作风格</label>
-                      <select
-                        value={config.style}
-                        onChange={(e) => setConfig({ ...config, style: e.target.value })}
-                        className="w-full px-3 py-2 bg-input border border-border rounded-md"
-                      >
-                        <option value="professional">专业严谨</option>
-                        <option value="casual">轻松幽默</option>
-                        <option value="emotional">情感共鸣</option>
-                        <option value="technical">技术分析</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="text-sm font-medium mb-2 block">文章长度</label>
-                      <select
-                        value={config.length}
-                        onChange={(e) => setConfig({ ...config, length: e.target.value })}
-                        className="w-full px-3 py-2 bg-input border border-border rounded-md"
-                      >
-                        <option value="short">短篇 (800-1200字)</option>
-                        <option value="medium">中篇 (1500-2500字)</option>
-                        <option value="long">长篇 (3000-5000字)</option>
-                      </select>
-                    </div>
-
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium">深度研究</span>
-                      <input
-                        type="checkbox"
-                        checked={config.enableResearch}
-                        onChange={(e) => setConfig({ ...config, enableResearch: e.target.checked })}
-                        className="w-4 h-4"
-                      />
-                    </div>
-
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium">生成封面图</span>
-                      <input
-                        type="checkbox"
-                        checked={config.generateCover}
-                        onChange={(e) => setConfig({ ...config, generateCover: e.target.checked })}
-                        className="w-4 h-4"
-                      />
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            {step === 'title' && (
-              <Card>
-                <CardHeader>
-                  <CardTitle>步骤 2: 选择标题</CardTitle>
-                  <CardDescription>AI 为你生成了多个标题,选择一个最合适的</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-3">
-                    {titles.map((item, index) => (
-                      <div
-                        key={index}
-                        className={`p-4 rounded-lg border cursor-pointer transition-colors ${
-                          selectedTitle === item.title ? 'border-primary bg-primary/10' : 'border-border hover:bg-muted/50'
-                        }`}
-                        onClick={() => setSelectedTitle(item.title)}
-                      >
-                        <div className="flex items-start justify-between">
-                          <div className="flex-1">
-                            <h4 className="font-medium mb-2">{item.title}</h4>
-                            <div className="flex items-center space-x-2">
-                              <Badge variant="secondary">点击率 {Math.round(item.predicted_click_rate * 100)}%</Badge>
-                              <Badge variant="outline">{item.emotion}</Badge>
-                            </div>
-                          </div>
-                          {selectedTitle === item.title && (
-                            <CheckCircle2 className="h-5 w-5 text-primary" />
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            {step === 'content' && (
-              <Card>
-                <CardHeader>
-                  <CardTitle>步骤 3: 文章内容</CardTitle>
-                  <CardDescription>AI 生成的文章内容,你可以进行编辑</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {content && (
-                    <div className="space-y-4">
-                      <div>
-                        <h3 className="text-lg font-bold mb-2">{selectedTitle}</h3>
-                        <p className="text-sm text-muted-foreground mb-4">{content.summary}</p>
-                      </div>
-
-                      <Separator />
-
-                      <div>
-                        <label className="text-sm font-medium mb-2 block">文章正文</label>
-                        <textarea
-                          value={content.content}
-                          onChange={(e) => setContent({ ...content, content: e.target.value })}
-                          className="w-full px-3 py-2 bg-input border border-border rounded-md min-h-[400px] font-mono text-sm"
-                        />
-                      </div>
-
-                      <div className="flex items-center space-x-2">
-                        <Badge variant="outline">质量评分: {Math.round((content.quality_score || 0) * 100)}%</Badge>
-                        {content.tags && content.tags.map((tag: string, index: number) => (
-                          <Badge key={index} variant="secondary">{tag}</Badge>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            )}
-
-            {step === 'images' && (
-              <Card>
-                <CardHeader>
-                  <CardTitle>步骤 4: 图片预览</CardTitle>
-                  <CardDescription>封面图和配图预览</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-4">
-                    {coverImage && (
-                      <div>
-                        <label className="text-sm font-medium mb-2 block">封面图</label>
-                        <img
-                          src={coverImage}
-                          alt="封面图"
-                          className="w-full rounded-lg border border-border"
-                        />
-                      </div>
-                    )}
-
-                    <div className="bg-muted/50 p-4 rounded-lg">
-                      <h4 className="font-medium mb-2">文章信息</h4>
-                      <div className="space-y-1 text-sm">
-                        <p><span className="text-muted-foreground">标题:</span> {selectedTitle}</p>
-                        <p><span className="text-muted-foreground">主题:</span> {topic}</p>
-                        <p><span className="text-muted-foreground">字数:</span> {content?.content?.length || 0} 字</p>
-                        <p><span className="text-muted-foreground">标签:</span> {content?.tags?.join(', ') || '无'}</p>
-                      </div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
+      {/* Step 1: Input Topic */}
+      {step === 'input' && (
+        <div className="bg-gradient-to-br from-[#f0f9f4]/90 via-white/90 to-[#f5f0ff]/90 backdrop-blur-xl rounded-2xl border border-slate-200 p-6 space-y-6 shadow-sm">
+          <div>
+            <label className="block text-sm font-medium mb-3 text-slate-700">选择AI模型</label>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {aiModels.map((model) => (
+                <button
+                  key={model.id}
+                  onClick={() => setAiModel(model.id)}
+                  className={`p-4 rounded-xl border-2 transition-all hover:scale-102 ${
+                    aiModel === model.id 
+                      ? `${model.borderColor} ${model.bgColor} shadow-lg shadow-indigo-500/10` 
+                      : 'border-slate-200 hover:border-indigo-300 bg-white'
+                  }`}
+                >
+                  <div className="text-2xl mb-2">{model.icon}</div>
+                  <div className="font-medium mb-1 text-slate-900">{model.name}</div>
+                  <div className="text-xs text-slate-500">{model.description}</div>
+                </button>
+              ))}
+            </div>
           </div>
 
-          {/* Right Panel - Actions */}
-          <div className="lg:col-span-1">
-            <Card>
-              <CardHeader>
-                <CardTitle>操作</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {step !== 'topic' && (
-                  <Button
-                    variant="outline"
-                    className="w-full"
-                    onClick={handleBack}
-                    disabled={loading}
-                  >
-                    上一步
-                  </Button>
-                )}
+          <div>
+            <label className="block text-sm font-medium mb-3 text-slate-700">输入主题/关键词</label>
+            <textarea
+              value={topic}
+              onChange={(e) => setTopic(e.target.value)}
+              placeholder="例如：AI大模型最新进展分析"
+              className="w-full h-32 p-4 rounded-xl bg-white/80 border border-slate-300 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 resize-none text-slate-800 placeholder-slate-400"
+            />
+          </div>
 
-                {step === 'topic' && (
-                  <Button
-                    className="w-full"
-                    onClick={handleNext}
-                    disabled={!topic || loading}
-                  >
-                    {loading ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        生成标题
-                      </>
-                    ) : (
-                      <>
-                        <Sparkles className="mr-2 h-4 w-4" />
-                        生成标题
-                      </>
-                    )}
-                  </Button>
-                )}
+          <div>
+            <label className="block text-sm font-medium mb-3 text-slate-700">写作风格</label>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {writingStyles.map((style) => (
+                <button
+                  key={style.id}
+                  className="p-4 rounded-xl border border-slate-200 hover:border-indigo-300 transition-all text-left bg-white hover:scale-102"
+                >
+                  <div className="font-medium mb-1 text-slate-900">{style.name}</div>
+                  <div className="text-xs text-slate-500">{style.description}</div>
+                </button>
+              ))}
+            </div>
+          </div>
 
-                {step === 'title' && (
-                  <Button
-                    className="w-full"
-                    onClick={handleNext}
-                    disabled={!selectedTitle || loading}
-                  >
-                    {loading ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        生成内容
-                      </>
-                    ) : (
-                      <>
-                        <BookOpen className="mr-2 h-4 w-4" />
-                        生成内容
-                      </>
-                    )}
-                  </Button>
-                )}
+          <div className="flex items-center gap-4">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" defaultChecked />
+              <span className="text-sm text-slate-700">联网搜索</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" defaultChecked />
+              <span className="text-sm text-slate-700">生成技术配图</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
+              <span className="text-sm text-slate-700">添加数据图表</span>
+            </label>
+          </div>
 
-                {step === 'content' && (
-                  <Button
-                    className="w-full"
-                    onClick={handleNext}
-                    disabled={loading}
-                  >
-                    <ImageIcon className="mr-2 h-4 w-4" />
-                    下一步
-                  </Button>
-                )}
+          <button
+            onClick={handleGenerateTitles}
+            disabled={!topic || isGenerating}
+            className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl hover:shadow-lg hover:shadow-indigo-500/30 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+          >
+            {isGenerating ? (
+              <>
+                <Loader2 size={20} className="animate-spin" />
+                生成中...
+              </>
+            ) : (
+              <>
+                <Wand2 size={20} />
+                生成标题
+              </>
+            )}
+          </button>
+        </div>
+      )}
 
-                {step === 'images' && (
-                  <Button
-                    className="w-full"
-                    onClick={handleNext}
-                    disabled={loading}
-                  >
-                    {loading ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        创建并发布
-                      </>
-                    ) : (
-                      <>
-                        <Send className="mr-2 h-4 w-4" />
-                        创建并发布
-                      </>
-                    )}
-                  </Button>
-                )}
+      {/* Step 2: Select Title */}
+      {step === 'titles' && (
+        <div className="bg-gradient-to-br from-[#f0f9f4]/90 via-white/90 to-[#f5f0ff]/90 backdrop-blur-xl rounded-2xl border border-slate-200 p-6 space-y-6 shadow-sm">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-semibold text-slate-900">选择标题</h2>
+            <button
+              onClick={handleGenerateTitles}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-300 hover:bg-slate-50 transition-colors text-slate-700"
+            >
+              <RefreshCw size={20} />
+              重新生成
+            </button>
+          </div>
 
-                <Separator />
-
-                <div className="space-y-2">
-                  <h4 className="text-sm font-medium">当前配置</h4>
-                  <div className="text-xs text-muted-foreground space-y-1">
-                    <p>风格: {config.style}</p>
-                    <p>长度: {config.length}</p>
-                    <p>深度研究: {config.enableResearch ? '开启' : '关闭'}</p>
-                    <p>生成封面: {config.generateCover ? '开启' : '关闭'}</p>
+          <div className="space-y-4">
+            {generatedTitles.map((item) => (
+              <button
+                key={item.id}
+                onClick={() => handleSelectTitle(item.title)}
+                className="w-full p-4 rounded-xl border-2 border-slate-200 hover:border-indigo-300 transition-all text-left group bg-white hover:scale-102"
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1">
+                    <div className="font-medium mb-2 text-slate-900 group-hover:text-indigo-600 transition-colors">
+                      {item.title}
+                    </div>
+                    <div className="flex items-center gap-2 text-sm text-slate-500">
+                      <Sparkles size={16} className="text-indigo-500" />
+                      预测点击率: {item.predictedClickRate}%
+                    </div>
+                  </div>
+                  <div className={`px-3 py-1 rounded-full text-sm font-medium ${
+                    item.predictedClickRate >= 80 ? 'bg-emerald-100 text-emerald-700' :
+                    item.predictedClickRate >= 70 ? 'bg-amber-100 text-amber-700' :
+                    'bg-slate-100 text-slate-700'
+                  }`}>
+                    {item.predictedClickRate >= 80 ? '优秀' :
+                     item.predictedClickRate >= 70 ? '良好' : '一般'}
                   </div>
                 </div>
-              </CardContent>
-            </Card>
+              </button>
+            ))}
+          </div>
+
+          <button
+            onClick={() => setStep('input')}
+            className="w-full flex items-center justify-center gap-2 px-6 py-3 rounded-xl border border-slate-300 hover:bg-slate-50 transition-colors text-slate-700"
+          >
+            返回修改
+          </button>
+        </div>
+      )}
+
+      {/* Step 3: Generate Content */}
+      {step === 'content' && (
+        <div className="bg-gradient-to-br from-[#f0f9f4]/90 via-white/90 to-[#f5f0ff]/90 backdrop-blur-xl rounded-2xl border border-slate-200 p-6 space-y-6 shadow-sm">
+          <div className="text-center py-12">
+            {isGenerating ? (
+              <>
+                <Loader2 size={48} className="mx-auto mb-4 text-indigo-600 animate-spin" />
+                <h2 className="text-xl font-semibold mb-2 text-slate-900">正在生成内容...</h2>
+                <p className="text-slate-600">AI正在为您创作高质量内容，请稍候</p>
+              </>
+            ) : (
+              <>
+                <div className="w-16 h-16 rounded-full bg-gradient-to-br from-indigo-500/10 to-purple-500/10 flex items-center justify-center mx-auto mb-4">
+                  <Sparkles size={32} className="text-indigo-600" />
+                </div>
+                <h2 className="text-xl font-semibold mb-2 text-slate-900">准备就绪</h2>
+                <p className="text-slate-600 mb-6">已选择标题：{selectedTitle}</p>
+                <button
+                  onClick={handleGenerateContent}
+                  className="flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl hover:shadow-lg hover:shadow-indigo-500/30 transition-all duration-300"
+                >
+                  <Wand2 size={20} />
+                  开始生成内容
+                </button>
+              </>
+            )}
           </div>
         </div>
-      </main>
+      )}
+
+      {/* Step 4: Preview */}
+      {step === 'preview' && generatedContent && (
+        <div className="space-y-6">
+          <div className="bg-gradient-to-br from-[#f0f9f4]/90 via-white/90 to-[#f5f0ff]/90 backdrop-blur-xl rounded-2xl border border-slate-200 p-6 shadow-sm">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-xl font-semibold text-slate-900">内容预览</h2>
+              <div className="flex items-center gap-2">
+                <button className="flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-300 hover:bg-slate-50 transition-colors text-slate-700">
+                  <Copy size={20} />
+                  复制
+                </button>
+                <button className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl hover:shadow-lg hover:shadow-indigo-500/30 transition-all duration-300">
+                  <Wand2 size={20} />
+                  优化内容
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-6">
+              {/* Title */}
+              <div>
+                <label className="block text-sm font-medium mb-2 text-slate-700">标题</label>
+                <input
+                  type="text"
+                  value={generatedContent.title}
+                  className="w-full p-3 rounded-xl bg-white/80 border border-slate-300 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 text-slate-800"
+                />
+              </div>
+
+              {/* Summary */}
+              <div>
+                <label className="block text-sm font-medium mb-2 text-slate-700">摘要</label>
+                <textarea
+                  value={generatedContent.summary}
+                  className="w-full h-24 p-3 rounded-xl bg-white/80 border border-slate-300 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 resize-none text-slate-800"
+                />
+              </div>
+
+              {/* Content */}
+              <div>
+                <label className="block text-sm font-medium mb-2 text-slate-700">正文内容</label>
+                <textarea
+                  value={generatedContent.content}
+                  className="w-full h-96 p-3 rounded-xl bg-white/80 border border-slate-300 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 resize-none font-mono text-sm text-slate-800"
+                />
+              </div>
+
+              {/* Quality Score */}
+              <div className="flex items-center justify-between p-4 rounded-xl bg-gradient-to-br from-indigo-50/50 to-purple-50/50 border border-indigo-200">
+                <div className="flex items-center gap-4">
+                  <div className="text-center">
+                    <div className="text-3xl font-bold text-indigo-600">{generatedContent.qualityScore}</div>
+                    <div className="text-sm text-slate-600">质量评分</div>
+                  </div>
+                  <div className="h-12 w-px bg-slate-300" />
+                  <div>
+                    <div className="text-sm text-slate-600 mb-1">参考来源</div>
+                    <div className="flex flex-wrap gap-2">
+                      {generatedContent.sources.map((source: string, index: number) => (
+                        <span key={index} className="px-2 py-1 rounded bg-indigo-100 text-indigo-700 text-xs font-medium">
+                          {source}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => setStep('input')}
+              className="flex-1 flex items-center justify-center gap-2 px-6 py-3 rounded-xl border border-slate-300 hover:bg-slate-50 transition-colors text-slate-700"
+            >
+              重新生成
+            </button>
+            <button className="flex-1 flex items-center justify-center gap-2 px-6 py-3 border border-slate-300 hover:bg-slate-50 transition-colors text-slate-700">
+              <Save size={20} />
+              保存草稿
+            </button>
+            <button className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white rounded-xl hover:shadow-lg hover:shadow-emerald-500/30 transition-all duration-300">
+              <Send size={20} />
+              直接发布
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
