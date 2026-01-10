@@ -30,7 +30,7 @@ class User(Base):
     bio = Column(String(500), nullable=True)
 
     # User role and permissions
-    role = Column(Enum(UserRole), default=UserRole.USER)
+    role = Column(Enum(UserRole), default=UserRole.NORMAL_USER)
     is_active = Column(Boolean, default=True)
     is_verified = Column(Boolean, default=False)
 
