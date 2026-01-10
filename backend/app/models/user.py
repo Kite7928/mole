@@ -6,9 +6,11 @@ import enum
 
 
 class UserRole(str, enum.Enum):
-    ADMIN = "admin"
-    USER = "user"
-    GUEST = "guest"
+    """用户角色枚举"""
+    SUPER_ADMIN = "super_admin"  # 超级管理员
+    CONTENT_OPERATOR = "content_operator"  # 内容运营
+    CONTENT_REVIEWER = "content_reviewer"  # 内容审核
+    NORMAL_USER = "normal_user"  # 普通用户
 
 
 class User(Base):

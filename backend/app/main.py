@@ -7,7 +7,7 @@ import time
 from .core.config import settings
 from .core.logger import logger
 from .core.database import init_db, close_db
-from .api import articles, news, wechat, tasks, health, statistics, integrations
+from .api import articles, news, wechat, tasks, health, statistics, integrations, auth
 
 
 @asynccontextmanager
@@ -87,6 +87,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 # Include routers
 app.include_router(health.router, prefix="/api/health", tags=["Health"])
+app.include_router(auth.router, prefix="/api/auth", tags=["Auth"])
 app.include_router(articles.router, prefix="/api/articles", tags=["Articles"])
 app.include_router(news.router, prefix="/api/news", tags=["News"])
 app.include_router(wechat.router, prefix="/api/wechat", tags=["WeChat"])

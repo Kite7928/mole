@@ -10,6 +10,10 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     SECRET_KEY: str = "your-secret-key-change-in-production"
 
+    # JWT Authentication
+    ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
+
     # Server
     HOST: str = "0.0.0.0"
     PORT: int = 8000
