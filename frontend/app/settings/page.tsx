@@ -43,6 +43,27 @@ export default function SettingsPage() {
     claudeModel: 'claude-3-opus-20240229',
     geminiApiKey: '',
     geminiModel: 'gemini-pro',
+    qwenApiKey: '',
+    qwenBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    qwenModel: 'qwen-max',
+    moonshotApiKey: '',
+    moonshotBaseUrl: 'https://api.moonshot.cn/v1',
+    moonshotModel: 'moonshot-v1-8k',
+    ollamaBaseUrl: 'http://localhost:11434',
+    ollamaModel: 'llama2',
+    volcengineApiKey: '',
+    volcengineBaseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
+    volcengineModel: 'ep-20240110134838-xxxxx',
+    alibabaBailianApiKey: '',
+    alibabaBailianBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    alibabaBailianModel: 'qwen-max',
+    siliconflowApiKey: '',
+    siliconflowBaseUrl: 'https://api.siliconflow.cn/v1',
+    siliconflowModel: 'Qwen/Qwen2.5-7B-Instruct',
+    openrouterApiKey: '',
+    openrouterBaseUrl: 'https://openrouter.ai/api/v1',
+    openrouterModel: 'openai/gpt-4-turbo',
+    aiRotationStrategy: 'sequential',
 
     // WeChat Config
     wechatAppId: '',
@@ -457,6 +478,372 @@ export default function SettingsPage() {
                         <option value="gemini-pro-vision">Gemini Pro Vision</option>
                       </select>
                     </div>
+                  </div>
+                </div>
+
+                <Separator />
+
+                {/* Qwen (通义千问) */}
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <h3 className="text-lg font-semibold">通义千问 (Qwen)</h3>
+                      <Badge variant="secondary" className="text-xs">阿里云</Badge>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleTestConnection('Qwen')}
+                    >
+                      测试连接
+                    </Button>
+                  </div>
+                  <div className="bg-muted/50 p-4 rounded-lg space-y-4">
+                    {renderSecretInput(
+                      'API Key',
+                      config.qwenApiKey,
+                      (value) => setConfig({ ...config, qwenApiKey: value }),
+                      'sk-...',
+                      'qwenApiKey'
+                    )}
+                    <div>
+                      <label className="text-sm font-medium mb-2 block">Base URL</label>
+                      <input
+                        type="text"
+                        value={config.qwenBaseUrl}
+                        onChange={(e) => setConfig({ ...config, qwenBaseUrl: e.target.value })}
+                        placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1"
+                        className="w-full px-3 py-2 bg-input border border-border rounded-md focus:ring-2 focus:ring-primary focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium mb-2 block">Model</label>
+                      <select
+                        value={config.qwenModel}
+                        onChange={(e) => setConfig({ ...config, qwenModel: e.target.value })}
+                        className="w-full px-3 py-2 bg-input border border-border rounded-md focus:ring-2 focus:ring-primary focus:border-transparent"
+                      >
+                        <option value="qwen-max">Qwen Max (最强)</option>
+                        <option value="qwen-plus">Qwen Plus</option>
+                        <option value="qwen-turbo">Qwen Turbo (快速)</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                <Separator />
+
+                {/* Moonshot Kimi */}
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <h3 className="text-lg font-semibold">Moonshot Kimi</h3>
+                      <Badge variant="outline" className="text-xs">Kimi</Badge>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleTestConnection('Moonshot')}
+                    >
+                      测试连接
+                    </Button>
+                  </div>
+                  <div className="bg-muted/50 p-4 rounded-lg space-y-4">
+                    {renderSecretInput(
+                      'API Key',
+                      config.moonshotApiKey,
+                      (value) => setConfig({ ...config, moonshotApiKey: value }),
+                      'sk-...',
+                      'moonshotApiKey'
+                    )}
+                    <div>
+                      <label className="text-sm font-medium mb-2 block">Base URL</label>
+                      <input
+                        type="text"
+                        value={config.moonshotBaseUrl}
+                        onChange={(e) => setConfig({ ...config, moonshotBaseUrl: e.target.value })}
+                        placeholder="https://api.moonshot.cn/v1"
+                        className="w-full px-3 py-2 bg-input border border-border rounded-md focus:ring-2 focus:ring-primary focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium mb-2 block">Model</label>
+                      <select
+                        value={config.moonshotModel}
+                        onChange={(e) => setConfig({ ...config, moonshotModel: e.target.value })}
+                        className="w-full px-3 py-2 bg-input border border-border rounded-md focus:ring-2 focus:ring-primary focus:border-transparent"
+                      >
+                        <option value="moonshot-v1-8k">Moonshot v1 8K</option>
+                        <option value="moonshot-v1-32k">Moonshot v1 32K</option>
+                        <option value="moonshot-v1-128k">Moonshot v1 128K</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                <Separator />
+
+                {/* Ollama */}
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <h3 className="text-lg font-semibold">Ollama</h3>
+                      <Badge variant="secondary" className="text-xs">本地部署</Badge>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleTestConnection('Ollama')}
+                    >
+                      测试连接
+                    </Button>
+                  </div>
+                  <div className="bg-muted/50 p-4 rounded-lg space-y-4">
+                    <div>
+                      <label className="text-sm font-medium mb-2 block">Base URL</label>
+                      <input
+                        type="text"
+                        value={config.ollamaBaseUrl}
+                        onChange={(e) => setConfig({ ...config, ollamaBaseUrl: e.target.value })}
+                        placeholder="http://localhost:11434"
+                        className="w-full px-3 py-2 bg-input border border-border rounded-md focus:ring-2 focus:ring-primary focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium mb-2 block">Model</label>
+                      <select
+                        value={config.ollamaModel}
+                        onChange={(e) => setConfig({ ...config, ollamaModel: e.target.value })}
+                        className="w-full px-3 py-2 bg-input border border-border rounded-md focus:ring-2 focus:ring-primary focus:border-transparent"
+                      >
+                        <option value="llama2">Llama 2</option>
+                        <option value="llama3">Llama 3</option>
+                        <option value="mistral">Mistral</option>
+                        <option value="codellama">Code Llama</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                <Separator />
+
+                {/* 火山引擎 */}
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <h3 className="text-lg font-semibold">火山引擎</h3>
+                      <Badge variant="outline" className="text-xs">字节跳动</Badge>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleTestConnection('Volcengine')}
+                    >
+                      测试连接
+                    </Button>
+                  </div>
+                  <div className="bg-muted/50 p-4 rounded-lg space-y-4">
+                    {renderSecretInput(
+                      'API Key',
+                      config.volcengineApiKey,
+                      (value) => setConfig({ ...config, volcengineApiKey: value }),
+                      '...',
+                      'volcengineApiKey'
+                    )}
+                    <div>
+                      <label className="text-sm font-medium mb-2 block">Base URL</label>
+                      <input
+                        type="text"
+                        value={config.volcengineBaseUrl}
+                        onChange={(e) => setConfig({ ...config, volcengineBaseUrl: e.target.value })}
+                        placeholder="https://ark.cn-beijing.volces.com/api/v3"
+                        className="w-full px-3 py-2 bg-input border border-border rounded-md focus:ring-2 focus:ring-primary focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium mb-2 block">Model</label>
+                      <input
+                        type="text"
+                        value={config.volcengineModel}
+                        onChange={(e) => setConfig({ ...config, volcengineModel: e.target.value })}
+                        placeholder="ep-20240110134838-xxxxx"
+                        className="w-full px-3 py-2 bg-input border border-border rounded-md focus:ring-2 focus:ring-primary focus:border-transparent"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <Separator />
+
+                {/* 阿里云百炼 */}
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <h3 className="text-lg font-semibold">阿里云百炼</h3>
+                      <Badge variant="secondary" className="text-xs">阿里云</Badge>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleTestConnection('Alibaba Bailian')}
+                    >
+                      测试连接
+                    </Button>
+                  </div>
+                  <div className="bg-muted/50 p-4 rounded-lg space-y-4">
+                    {renderSecretInput(
+                      'API Key',
+                      config.alibabaBailianApiKey,
+                      (value) => setConfig({ ...config, alibabaBailianApiKey: value }),
+                      'sk-...',
+                      'alibabaBailianApiKey'
+                    )}
+                    <div>
+                      <label className="text-sm font-medium mb-2 block">Base URL</label>
+                      <input
+                        type="text"
+                        value={config.alibabaBailianBaseUrl}
+                        onChange={(e) => setConfig({ ...config, alibabaBailianBaseUrl: e.target.value })}
+                        placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1"
+                        className="w-full px-3 py-2 bg-input border border-border rounded-md focus:ring-2 focus:ring-primary focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium mb-2 block">Model</label>
+                      <select
+                        value={config.alibabaBailianModel}
+                        onChange={(e) => setConfig({ ...config, alibabaBailianModel: e.target.value })}
+                        className="w-full px-3 py-2 bg-input border border-border rounded-md focus:ring-2 focus:ring-primary focus:border-transparent"
+                      >
+                        <option value="qwen-max">Qwen Max</option>
+                        <option value="qwen-plus">Qwen Plus</option>
+                        <option value="qwen-turbo">Qwen Turbo</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                <Separator />
+
+                {/* 硅基流动 */}
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <h3 className="text-lg font-semibold">硅基流动</h3>
+                      <Badge variant="outline" className="text-xs">SiliconFlow</Badge>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleTestConnection('SiliconFlow')}
+                    >
+                      测试连接
+                    </Button>
+                  </div>
+                  <div className="bg-muted/50 p-4 rounded-lg space-y-4">
+                    {renderSecretInput(
+                      'API Key',
+                      config.siliconflowApiKey,
+                      (value) => setConfig({ ...config, siliconflowApiKey: value }),
+                      'sk-...',
+                      'siliconflowApiKey'
+                    )}
+                    <div>
+                      <label className="text-sm font-medium mb-2 block">Base URL</label>
+                      <input
+                        type="text"
+                        value={config.siliconflowBaseUrl}
+                        onChange={(e) => setConfig({ ...config, siliconflowBaseUrl: e.target.value })}
+                        placeholder="https://api.siliconflow.cn/v1"
+                        className="w-full px-3 py-2 bg-input border border-border rounded-md focus:ring-2 focus:ring-primary focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium mb-2 block">Model</label>
+                      <select
+                        value={config.siliconflowModel}
+                        onChange={(e) => setConfig({ ...config, siliconflowModel: e.target.value })}
+                        className="w-full px-3 py-2 bg-input border border-border rounded-md focus:ring-2 focus:ring-primary focus:border-transparent"
+                      >
+                        <option value="Qwen/Qwen2.5-7B-Instruct">Qwen 2.5 7B</option>
+                        <option value="Qwen/Qwen2.5-72B-Instruct">Qwen 2.5 72B</option>
+                        <option value="deepseek-ai/DeepSeek-V3">DeepSeek V3</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                <Separator />
+
+                {/* OpenRouter */}
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <h3 className="text-lg font-semibold">OpenRouter</h3>
+                      <Badge variant="secondary" className="text-xs">多模型聚合</Badge>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleTestConnection('OpenRouter')}
+                    >
+                      测试连接
+                    </Button>
+                  </div>
+                  <div className="bg-muted/50 p-4 rounded-lg space-y-4">
+                    {renderSecretInput(
+                      'API Key',
+                      config.openrouterApiKey,
+                      (value) => setConfig({ ...config, openrouterApiKey: value }),
+                      'sk-or-...',
+                      'openrouterApiKey'
+                    )}
+                    <div>
+                      <label className="text-sm font-medium mb-2 block">Base URL</label>
+                      <input
+                        type="text"
+                        value={config.openrouterBaseUrl}
+                        onChange={(e) => setConfig({ ...config, openrouterBaseUrl: e.target.value })}
+                        placeholder="https://openrouter.ai/api/v1"
+                        className="w-full px-3 py-2 bg-input border border-border rounded-md focus:ring-2 focus:ring-primary focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium mb-2 block">Model</label>
+                      <select
+                        value={config.openrouterModel}
+                        onChange={(e) => setConfig({ ...config, openrouterModel: e.target.value })}
+                        className="w-full px-3 py-2 bg-input border border-border rounded-md focus:ring-2 focus:ring-primary focus:border-transparent"
+                      >
+                        <option value="openai/gpt-4-turbo">GPT-4 Turbo</option>
+                        <option value="anthropic/claude-3-opus">Claude 3 Opus</option>
+                        <option value="google/gemini-pro">Gemini Pro</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                <Separator />
+
+                {/* 轮询策略 */}
+                <div className="space-y-4">
+                  <div className="flex items-center space-x-2">
+                    <h3 className="text-lg font-semibold">轮询策略</h3>
+                    <Badge variant="default" className="text-xs">智能选择</Badge>
+                  </div>
+                  <div className="bg-muted/50 p-4 rounded-lg">
+                    <label className="text-sm font-medium mb-2 block">选择提供商轮询策略</label>
+                    <select
+                      value={config.aiRotationStrategy}
+                      onChange={(e) => setConfig({ ...config, aiRotationStrategy: e.target.value })}
+                      className="w-full px-3 py-2 bg-input border border-border rounded-md focus:ring-2 focus:ring-primary focus:border-transparent"
+                    >
+                      <option value="sequential">顺序轮询 - 按顺序依次使用提供商</option>
+                      <option value="random">随机轮询 - 随机选择可用提供商</option>
+                    </select>
+                    <p className="text-xs text-muted-foreground mt-2">
+                      当不指定提供商时，系统会使用此策略自动选择AI模型
+                    </p>
                   </div>
                 </div>
               </CardContent>
