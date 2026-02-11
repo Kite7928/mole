@@ -12,7 +12,7 @@ from .core.config import settings
 from .core.logger import logger
 from .core.database import init_db, close_db
 from .models import *  # 导入所有模型以注册到 Base.metadata
-from .api import articles, news, unified_ai, wechat, config, health, hotspots, templates, charts, creator, ai_streaming, publish, multiplatform, unified_ai_advanced
+from .api import articles, news, unified_ai, wechat, config, health, hotspots, templates, charts, creator, ai_streaming, publish, multiplatform, unified_ai_advanced, preview
 from .api.unified_ai import providers_alias_router
 from .services.unified_ai_service import (
     unified_ai_service,
@@ -184,6 +184,7 @@ app.include_router(charts.router, prefix="/api/charts", tags=["数据图表"])
 app.include_router(creator.router, prefix="/api/creator", tags=["自媒体工具"])
 app.include_router(publish.router, prefix="/api/publish", tags=["多平台发布"])
 app.include_router(multiplatform.router, prefix="/api/multiplatform", tags=["多平台发布-Mixpost"])
+app.include_router(preview.router, prefix="/api/preview", tags=["文章预览"])
 
 # 挂载静态文件服务（用于提供上传的图片）
 uploads_dir = Path(settings.UPLOAD_DIR)

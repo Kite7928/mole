@@ -19,6 +19,13 @@ feedparser==6.0.10
 # Image processing
 Pillow==10.2.0
 
+# Markdown processing
+markdown==3.6
+markdown-extensions==2.13
+Pygments==2.17.2
+lxml==5.1.0
+premailer==3.10.0
+
 # Utilities
 pydantic==2.5.3
 pydantic-settings==2.1.0
