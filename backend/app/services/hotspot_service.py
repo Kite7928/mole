@@ -12,6 +12,7 @@ from bs4 import BeautifulSoup
 import feedparser
 from ..core.logger import logger
 from ..core.config import settings
+from ..core.exceptions import HotspotFetchError
 
 
 class HotspotSource(str, Enum):
@@ -102,8 +103,7 @@ class HotspotService:
 
         except Exception as e:
             logger.error(f"获取微博热搜失败: {str(e)}")
-            # 返回模拟数据
-            return self._get_mock_hotspots(HotspotSource.WEIBO, count)
+            raise HotspotFetchError(f"获取微博热搜失败: {str(e)}") from e
 
     async def fetch_zhihu_hotspots(self, count: int = 20) -> List[Dict[str, Any]]:
         """
@@ -154,8 +154,7 @@ class HotspotService:
 
         except Exception as e:
             logger.error(f"获取知乎热榜失败: {str(e)}")
-            # 返回模拟数据
-            return self._get_mock_hotspots(HotspotSource.ZHIHU, count)
+            raise HotspotFetchError(f"获取知乎热榜失败: {str(e)}") from e
 
     async def fetch_bilibili_hotspots(self, count: int = 20) -> List[Dict[str, Any]]:
         """
@@ -205,8 +204,7 @@ class HotspotService:
 
         except Exception as e:
             logger.error(f"获取B站热门失败: {str(e)}")
-            # 返回模拟数据
-            return self._get_mock_hotspots(HotspotSource.BILIBILI, count)
+            raise HotspotFetchError(f"获取B站热门失败: {str(e)}") from e
 
     async def fetch_weibo_hotspots_rsshub(self, count: int = 20) -> List[Dict[str, Any]]:
         """
@@ -386,8 +384,7 @@ class HotspotService:
 
         except Exception as e:
             logger.error(f"获取36氪热点失败: {str(e)}")
-            # 返回模拟数据
-            return self._get_mock_hotspots(HotspotSource.KR36, count)
+            raise HotspotFetchError(f"获取36氪热点失败: {str(e)}") from e
 
     async def fetch_sspai_hotspots(self, count: int = 20) -> List[Dict[str, Any]]:
         """
@@ -431,8 +428,7 @@ class HotspotService:
 
         except Exception as e:
             logger.error(f"获取少数派热点失败: {str(e)}")
-            # 返回模拟数据
-            return self._get_mock_hotspots(HotspotSource.SSPAI, count)
+            raise HotspotFetchError(f"获取少数派热点失败: {str(e)}") from e
 
     async def fetch_all_hotspots(
         self,
@@ -575,97 +571,6 @@ class HotspotService:
             return None
 
         return self.cache.get("data")
-
-    def _get_mock_hotspots(self, source: HotspotSource, count: int) -> List[Dict[str, Any]]:
-        """获取模拟数据（当API调用失败时）"""
-        mock_titles = {
-            HotspotSource.WEIBO: [
-                "AI技术最新突破，ChatGPT迎来重大更新",
-                "2024年科技趋势预测，这些领域将迎来爆发",
-                "新能源汽车市场竞争加剧，各大品牌纷纷降价",
-                "房地产市场迎来新政策，购房者迎来利好",
-                "教育部发布新政策，教育行业迎来变革",
-                "春节假期消费数据创新高，经济复苏势头强劲",
-                "娱乐圈重磅消息，多位明星宣布回归",
-                "国际局势最新动态，多国领导人举行会谈",
-                "体育赛事精彩瞬间，中国队获得历史性突破",
-                "美食界新发现，这道菜竟然有这么多功效",
-            ],
-            HotspotSource.ZHIHU: [
-                "如何评价GPT-4o的最新发布？",
-                "2024年最值得学习的编程语言是什么？",
-                "如何提高工作效率？这些方法你必须知道",
-                "为什么越来越多人选择远程办公？",
-                "新手如何开始健身？这份指南请收好",
-                "有哪些好用的效率工具推荐？",
-                "如何建立良好的学习习惯？",
-                "职场新人如何快速成长？",
-                "有什么好的理财建议？",
-                "如何平衡工作和生活？",
-            ],
-            HotspotSource.BILIBILI: [
-                "AI生成视频技术大揭秘，几分钟制作专业级视频",
-                "2024年最火的科技产品盘点",
-                "编程入门教程，零基础也能学会",
-                "美食制作全过程，在家也能做出餐厅级美味",
-                "旅行攻略分享，这些地方值得一去",
-                "游戏精彩瞬间回顾，操作太秀了",
-                "DIY教程，教你制作实用小工具",
-                "知识科普，这些冷知识你都知道吗？",
-                "音乐推荐，这几首歌太好听了",
-                "健身教程，跟着练就能瘦",
-            ],
-            HotspotSource.KR36: [
-                "OpenAI 发布 GPT-5，多项能力大幅提升",
-                "新能源汽车市场格局重塑，新势力崛起",
-                "AI芯片市场竞争白热化，英伟达面临挑战",
-                "元宇宙概念回归，多家巨头加码布局",
-                "智能家居行业迎来新机遇，AI赋能生活",
-                "云计算市场持续增长，竞争加剧",
-                "网络安全威胁升级，企业安全投入增加",
-                "5G应用场景加速落地，催生新商业模式",
-                "量子计算突破性进展，商业化进程加速",
-                "数字货币监管趋严，行业进入规范期",
-            ],
-            HotspotSource.SSPAI: [
-                "提升工作效率的10个实用工具推荐",
-                "如何构建个人知识管理系统？",
-                "远程办公最佳实践指南",
-                "程序员必备的开发环境配置",
-                "Markdown写作进阶技巧",
-                "时间管理的艺术：从理论到实践",
-                "如何高效学习新技术？",
-                "极简主义生活指南",
-                "打造高效工作环境的5个步骤",
-                "数字游民的生活方式与工作方式",
-            ]
-        }
-
-        titles = mock_titles.get(source, [])
-        hotspots = []
-
-        # 根据源设置分类
-        category_map = {
-            HotspotSource.WEIBO: HotspotCategory.SOCIAL.value,
-            HotspotSource.ZHIHU: HotspotCategory.KNOWLEDGE.value,
-            HotspotSource.BILIBILI: HotspotCategory.ENTERTAINMENT.value,
-            HotspotSource.KR36: HotspotCategory.TECH.value,
-            HotspotSource.SSPAI: HotspotCategory.TECH.value,
-        }
-
-        for i, title in enumerate(titles[:count]):
-            hotspots.append({
-                "rank": i + 1,
-                "title": title,
-                "url": "#",
-                "heat": (count - i) * 100000,
-                "source": source.value,
-                "category": category_map.get(source, HotspotCategory.GENERAL.value),
-                "tags": [],
-                "created_at": datetime.utcnow().isoformat()
-            })
-
-        return hotspots
 
     async def generate_topic_suggestions(
         self,

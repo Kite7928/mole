@@ -17,6 +17,7 @@ from sqlalchemy import select, update, delete
 from sqlalchemy.sql import func
 
 from ..core.logger import logger
+from ..core.exceptions import NotImplementedError
 from ..models.publish_platform import (
     PlatformType, PublishStatus, PlatformConfig,
     PublishRecord, PublishTask, PLATFORM_INFO
@@ -230,40 +231,19 @@ class ZhihuPublisher(BasePublisher):
         """发布文章到知乎"""
         try:
             logger.info(f"开始发布文章到知乎: {article.title}")
-            
-            # 使用Selenium或API实现实际发布
-            # 当前实现：保存发布记录到数据库（模拟发布成功）
-            # 实际实现建议：
+
+            # 真实发布功能尚未实现
+            # 需要集成以下功能之一：
             # 1. 使用Selenium + WebDriver模拟浏览器操作
-            # 2. 或使用知乎API（需要申请API权限）
-            # 3. 或使用requests + BeautifulSoup模拟表单提交
-            
-            # 这里保存发布记录到数据库
-            record = PublishRecord(
-                article_id=0,  # 需要传入实际文章ID
-                platform=self.platform,
-                status=PublishStatus.SUCCESS,
-                platform_article_id=f"zhihu_{int(datetime.now().timestamp())}",
-                platform_article_url=f"https://zhuanlan.zhihu.com/p/{int(datetime.now().timestamp())}",
-                title_snapshot=article.title,
-                content_snapshot=article.content[:1000]
+            # 2. 使用知乎API（需要申请API权限）
+            # 3. 使用requests + BeautifulSoup模拟表单提交
+            raise NotImplementedError(
+                message="知乎真实发布功能尚未实现",
+                feature="zhihu_publish"
             )
-            
-            db.add(record)
-            await db.commit()
-            
-            logger.info(f"知乎发布成功（模拟）: {record.platform_article_url}")
-            logger.warning("当前为模拟发布，实际发布需要集成Selenium或知乎API")
-            
-            return PublishResult(
-                success=True,
-                platform=self.platform,
-                message="文章已发布到知乎（模拟）",
-                article_id=record.platform_article_id,
-                article_url=record.platform_article_url,
-                metadata={"record_id": record.id, "is_simulation": True}
-            )
-            
+
+        except NotImplementedError:
+            raise
         except Exception as e:
             logger.error(f"知乎发布失败: {e}", exc_info=True)
             return PublishResult(
@@ -286,27 +266,18 @@ class ZhihuPublisher(BasePublisher):
     async def fetch_stats(self, platform_article_id: str) -> Optional[PlatformStats]:
         """获取知乎文章统计数据"""
         try:
-            # 使用Selenium或API获取真实统计数据
-            # 当前实现：返回模拟数据
-            # 实际实现建议：
+            # 真实统计数据获取功能尚未实现
+            # 需要集成以下功能之一：
             # 1. 使用Selenium爬取知乎文章页面的统计信息
-            # 2. 或使用知乎API获取统计数据
+            # 2. 使用知乎API获取统计数据
             # 3. 需要解析页面HTML或API返回的JSON数据
-            
-            import random
-            stats = PlatformStats(
-                view_count=random.randint(100, 1000),
-                like_count=random.randint(10, 100),
-                comment_count=random.randint(1, 20),
-                collect_count=random.randint(5, 50),
-                follower_count=random.randint(50, 500)
+            raise NotImplementedError(
+                message="知乎真实统计数据获取功能尚未实现",
+                feature="zhihu_fetch_stats"
             )
-            
-            logger.info(f"知乎文章 {platform_article_id} 统计数据已获取（模拟）: 阅读={stats.view_count}, 点赞={stats.like_count}")
-            logger.warning("当前为模拟数据，实际数据需要集成Selenium或知乎API")
-            
-            return stats
-            
+
+        except NotImplementedError:
+            raise
         except Exception as e:
             logger.error(f"获取知乎统计数据失败: {e}", exc_info=True)
             return None
@@ -337,39 +308,19 @@ class JuejinPublisher(BasePublisher):
         """发布文章到掘金"""
         try:
             logger.info(f"开始发布文章到掘金: {article.title}")
-            
-            # 使用API或Selenium实现实际发布
-            # 当前实现：保存发布记录到数据库（模拟发布成功）
-            # 实际实现建议：
+
+            # 真实发布功能尚未实现
+            # 需要集成以下功能之一：
             # 1. 使用掘金API（需要申请API权限）
-            # 2. 或使用Selenium + WebDriver模拟浏览器操作
+            # 2. 使用Selenium + WebDriver模拟浏览器操作
             # 3. 需要处理Markdown格式转换、图片上传等
-            
-            record = PublishRecord(
-                article_id=0,
-                platform=self.platform,
-                status=PublishStatus.SUCCESS,
-                platform_article_id=f"juejin_{int(datetime.now().timestamp())}",
-                platform_article_url=f"https://juejin.cn/post/{int(datetime.now().timestamp())}",
-                title_snapshot=article.title,
-                content_snapshot=article.content[:1000]
+            raise NotImplementedError(
+                message="掘金真实发布功能尚未实现",
+                feature="juejin_publish"
             )
-            
-            db.add(record)
-            await db.commit()
-            
-            logger.info(f"掘金发布成功（模拟）: {record.platform_article_url}")
-            logger.warning("当前为模拟发布，实际发布需要集成掘金API或Selenium")
-            
-            return PublishResult(
-                success=True,
-                platform=self.platform,
-                message="文章已发布到掘金（模拟）",
-                article_id=record.platform_article_id,
-                article_url=record.platform_article_url,
-                metadata={"record_id": record.id, "is_simulation": True}
-            )
-            
+
+        except NotImplementedError:
+            raise
         except Exception as e:
             logger.error(f"掘金发布失败: {e}", exc_info=True)
             return PublishResult(
@@ -383,26 +334,18 @@ class JuejinPublisher(BasePublisher):
     async def fetch_stats(self, platform_article_id: str) -> Optional[PlatformStats]:
         """获取掘金文章统计数据"""
         try:
-            # 使用API获取真实统计数据
-            # 当前实现：返回模拟数据
-            # 实际实现建议：
+            # 真实统计数据获取功能尚未实现
+            # 需要集成以下功能之一：
             # 1. 使用掘金API获取文章统计数据
-            # 2. 或使用Selenium爬取掘金文章页面的统计信息
+            # 2. 使用Selenium爬取掘金文章页面的统计信息
             # 3. 需要解析API返回的JSON数据或页面HTML
-            
-            import random
-            stats = PlatformStats(
-                view_count=random.randint(50, 500),
-                like_count=random.randint(5, 50),
-                comment_count=random.randint(0, 10),
-                collect_count=random.randint(2, 20)
+            raise NotImplementedError(
+                message="掘金真实统计数据获取功能尚未实现",
+                feature="juejin_fetch_stats"
             )
-            
-            logger.info(f"掘金文章 {platform_article_id} 统计数据已获取（模拟）: 阅读={stats.view_count}, 点赞={stats.like_count}")
-            logger.warning("当前为模拟数据，实际数据需要集成掘金API或Selenium")
-            
-            return stats
-            
+
+        except NotImplementedError:
+            raise
         except Exception as e:
             logger.error(f"获取掘金统计数据失败: {e}", exc_info=True)
             return None
@@ -433,39 +376,19 @@ class ToutiaoPublisher(BasePublisher):
         """发布文章到今日头条"""
         try:
             logger.info(f"开始发布文章到头条: {article.title}")
-            
-            # 使用API或Selenium实现实际发布
-            # 当前实现：保存发布记录到数据库（模拟发布成功）
-            # 实际实现建议：
+
+            # 真实发布功能尚未实现
+            # 需要集成以下功能之一：
             # 1. 使用今日头条API（需要申请API权限）
-            # 2. 或使用Selenium + WebDriver模拟浏览器操作
+            # 2. 使用Selenium + WebDriver模拟浏览器操作
             # 3. 需要处理Markdown格式转换、图片上传、封面图等
-            
-            record = PublishRecord(
-                article_id=0,
-                platform=self.platform,
-                status=PublishStatus.SUCCESS,
-                platform_article_id=f"toutiao_{int(datetime.now().timestamp())}",
-                platform_article_url=f"https://www.toutiao.com/item/{int(datetime.now().timestamp())}",
-                title_snapshot=article.title,
-                content_snapshot=article.content[:1000]
+            raise NotImplementedError(
+                message="头条真实发布功能尚未实现",
+                feature="toutiao_publish"
             )
-            
-            db.add(record)
-            await db.commit()
-            
-            logger.info(f"头条发布成功（模拟）: {record.platform_article_url}")
-            logger.warning("当前为模拟发布，实际发布需要集成头条API或Selenium")
-            
-            return PublishResult(
-                success=True,
-                platform=self.platform,
-                message="文章已发布到头条（模拟）",
-                article_id=record.platform_article_id,
-                article_url=record.platform_article_url,
-                metadata={"record_id": record.id, "is_simulation": True}
-            )
-            
+
+        except NotImplementedError:
+            raise
         except Exception as e:
             logger.error(f"头条发布失败: {e}", exc_info=True)
             return PublishResult(
@@ -479,26 +402,18 @@ class ToutiaoPublisher(BasePublisher):
     async def fetch_stats(self, platform_article_id: str) -> Optional[PlatformStats]:
         """获取今日头条文章统计数据"""
         try:
-            # 使用API获取真实统计数据
-            # 当前实现：返回模拟数据
-            # 实际实现建议：
+            # 真实统计数据获取功能尚未实现
+            # 需要集成以下功能之一：
             # 1. 使用今日头条API获取文章统计数据
-            # 2. 或使用Selenium爬取头条文章页面的统计信息
+            # 2. 使用Selenium爬取头条文章页面的统计信息
             # 3. 需要解析API返回的JSON数据或页面HTML
-            
-            import random
-            stats = PlatformStats(
-                view_count=random.randint(200, 2000),
-                like_count=random.randint(20, 200),
-                comment_count=random.randint(2, 30),
-                share_count=random.randint(1, 50)
+            raise NotImplementedError(
+                message="头条真实统计数据获取功能尚未实现",
+                feature="toutiao_fetch_stats"
             )
-            
-            logger.info(f"头条文章 {platform_article_id} 统计数据已获取（模拟）: 阅读={stats.view_count}, 点赞={stats.like_count}")
-            logger.warning("当前为模拟数据，实际数据需要集成头条API或Selenium")
-            
-            return stats
-            
+
+        except NotImplementedError:
+            raise
         except Exception as e:
             logger.error(f"获取头条统计数据失败: {e}", exc_info=True)
             return None

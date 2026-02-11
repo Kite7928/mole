@@ -172,6 +172,45 @@ class ConfigurationError(BaseApplicationError):
         )
 
 
+class HotspotFetchError(BaseApplicationError):
+    """热点数据获取错误"""
+    def __init__(
+        self,
+        message: str,
+        source: Optional[str] = None,
+        original_error: Optional[Exception] = None
+    ):
+        details = {}
+        if source:
+            details["source"] = source
+        if original_error:
+            details["original_error"] = str(original_error)
+        super().__init__(
+            message=message,
+            error_code="HOTSPOT_FETCH_ERROR",
+            status_code=503,
+            details=details
+        )
+
+
+class NotImplementedError(BaseApplicationError):
+    """功能未实现错误"""
+    def __init__(
+        self,
+        message: str,
+        feature: Optional[str] = None
+    ):
+        details = {}
+        if feature:
+            details["feature"] = feature
+        super().__init__(
+            message=message,
+            error_code="NOT_IMPLEMENTED",
+            status_code=501,
+            details=details
+        )
+
+
 # ============================================================================
 # 错误处理装饰器
 # ============================================================================
@@ -387,6 +426,8 @@ __all__ = [
     "AIServiceError",
     "PublishError",
     "ConfigurationError",
+    "HotspotFetchError",
+    "NotImplementedError",
     
     # 装饰器
     "handle_errors",
