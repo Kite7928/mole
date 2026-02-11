@@ -111,8 +111,14 @@ export default function HotspotsPage() {
   const getSourceLogo = (source: string) => {
     const logos: Record<string, string> = {
       'ithome': '🏠',
-      '36kr': '🚀',
       'baidu': '🔍',
+      'kr36': '🚀',
+      'sspai': '🎯',
+      'huxiu': '🐯',
+      'tmpost': '⚡',
+      'infoq': '💡',
+      'juejin': '💎',
+      'zhihu_daily': '📚',
       'zhihu': '📚',
       'weibo': '📱'
     }
@@ -135,6 +141,13 @@ export default function HotspotsPage() {
     { id: 'all', name: '全部' },
     { id: 'ithome', name: 'IT之家' },
     { id: 'baidu', name: '百度资讯' },
+    { id: 'kr36', name: '36氪' },
+    { id: 'sspai', name: '少数派' },
+    { id: 'huxiu', name: '虎嗅' },
+    { id: 'tmpost', name: '钛媒体' },
+    { id: 'infoq', name: 'InfoQ' },
+    { id: 'juejin', name: '掘金' },
+    { id: 'zhihu_daily', name: '知乎日报' },
   ]
 
   const categories = [
@@ -158,15 +171,28 @@ export default function HotspotsPage() {
     setIsRefreshing(true)
     try {
       // 根据当前选择的平台刷新新闻
-      const source = selectedPlatform === 'all' ? 'ithome' : selectedPlatform
-      
-      const response = await fetch(`${API_URL}/api/news/refresh`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ source: source, limit: 20 })
-      })
-      const data = await response.json()
-      if (data.success) {
+      let sources: string[]
+
+      if (selectedPlatform === 'all') {
+        // 如果选择全部，从主要源刷新（前5个）
+        sources = ['ithome', 'baidu', 'kr36', 'sspai', 'huxiu']
+      } else {
+        sources = [selectedPlatform]
+      }
+
+      // 并发刷新所有源
+      const refreshPromises = sources.map(source =>
+        fetch(`${API_URL}/api/news/refresh`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ source, limit: 10 })
+        }).then(res => res.json())
+      )
+
+      const results = await Promise.all(refreshPromises)
+      const successCount = results.filter(r => r.success).length
+
+      if (successCount > 0) {
         // 刷新成功后重新获取新闻列表
         await fetchNews()
       }
