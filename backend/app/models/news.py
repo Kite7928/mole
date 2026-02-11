@@ -7,6 +7,13 @@ import enum
 class NewsSource(str, enum.Enum):
     ITHOME = "ithome"       # IT之家
     BAIDU = "baidu"         # 百度资讯
+    KR36 = "kr36"           # 36氪
+    SSPAI = "sspai"         # 少数派
+    HUXIU = "huxiu"         # 虎嗅
+    TMPOST = "tmpost"       # 钛媒体
+    INFOQ = "infoq"         # InfoQ
+    JUEJIN = "juejin"       # 掘金
+    ZHIHU_DAILY = "zhihu_daily"  # 知乎日报
     OTHER = "other"         # 其他
 
 

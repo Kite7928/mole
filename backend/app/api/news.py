@@ -18,6 +18,33 @@ from ..core.logger import logger
 router = APIRouter()
 
 
+@router.get("/sources", response_model=dict)
+async def get_news_sources():
+    """
+    获取所有可用的新闻源列表
+
+    Returns:
+        包含新闻源列表的字典
+    """
+    sources = [
+        {"value": "ithome", "name": "IT之家", "type": "rss"},
+        {"value": "baidu", "name": "百度资讯", "type": "html"},
+        {"value": "kr36", "name": "36氪", "type": "rss"},
+        {"value": "sspai", "name": "少数派", "type": "rss"},
+        {"value": "huxiu", "name": "虎嗅", "type": "rss"},
+        {"value": "tmpost", "name": "钛媒体", "type": "rss"},
+        {"value": "infoq", "name": "InfoQ", "type": "rss"},
+        {"value": "juejin", "name": "掘金", "type": "rss"},
+        {"value": "zhihu_daily", "name": "知乎日报", "type": "rss"}
+    ]
+
+    return {
+        "success": True,
+        "count": len(sources),
+        "sources": sources
+    }
+
+
 class NewsResponse(BaseModel):
     """新闻响应模型"""
     id: int
@@ -36,7 +63,10 @@ class NewsResponse(BaseModel):
 
 class RefreshRequest(BaseModel):
     """刷新请求模型"""
-    source: str = Field(default="ithome", description="新闻源：ithome 或 baidu")
+    source: str = Field(
+        default="ithome",
+        description="新闻源：ithome, baidu, kr36, sspai, huxiu, tmpost, infoq, juejin, zhihu_daily"
+    )
     limit: int = Field(default=20, ge=1, le=50, description="获取数量")
 
 
@@ -93,7 +123,7 @@ async def get_hotspots(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    获取热点新闻列表
+    获取热点新闻列表（从所有源）
 
     Args:
         limit: 返回数量限制
@@ -105,11 +135,8 @@ async def get_hotspots(
     try:
         logger.info(f"获取热点新闻，数量限制: {limit}")
 
-        # 从IT之家获取新闻
-        fetched_items = await news_fetcher_service.fetch_news(
-            source=NewsSource.ITHOME,
-            limit=limit
-        )
+        # 从所有源获取新闻
+        fetched_items = await news_fetcher_service.fetch_all_news(limit_per_source=limit)
 
         # 保存到数据库（去重）
         news_items = []
@@ -119,7 +146,7 @@ async def get_hotspots(
                 select(NewsItem).where(NewsItem.url == item.url)
             )
             existing_item = existing.scalar_one_or_none()
-            
+
             if not existing_item:
                 db.add(item)
                 await db.commit()
@@ -128,6 +155,10 @@ async def get_hotspots(
             else:
                 # 如果已存在，使用现有记录
                 news_items.append(existing_item)
+
+        # 按热度排序并限制数量
+        news_items.sort(key=lambda x: x.hot_score or 0, reverse=True)
+        news_items = news_items[:limit]
 
         # 转换为响应模型
         news_responses = []
@@ -177,7 +208,14 @@ async def refresh_news(
         # 解析新闻源
         source_map = {
             "ithome": NewsSource.ITHOME,
-            "baidu": NewsSource.BAIDU
+            "baidu": NewsSource.BAIDU,
+            "kr36": NewsSource.KR36,
+            "sspai": NewsSource.SSPAI,
+            "huxiu": NewsSource.HUXIU,
+            "tmpost": NewsSource.TMPOST,
+            "infoq": NewsSource.INFOQ,
+            "juejin": NewsSource.JUEJIN,
+            "zhihu_daily": NewsSource.ZHIHU_DAILY
         }
 
         source = source_map.get(request.source, NewsSource.ITHOME)
