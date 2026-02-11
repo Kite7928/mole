@@ -1,217 +1,211 @@
 """
-统一AI模型服务
+统一AI模型服务 - 重构版
 支持多个AI提供商，提供统一的调用接口、Token计算、日志记录、错误处理和轮询机制
+支持从数据库读取配置（优先）或环境变量（回退）
 """
 
-from typing import Optional, List, Dict, Any, AsyncGenerator
-from enum import Enum
+from typing import List, Dict, Any, AsyncGenerator, Optional
 import random
 import asyncio
-from datetime import datetime
 import tiktoken
-import httpx
-from openai import AsyncOpenAI
-import anthropic
+
 from ..core.config import settings
 from ..core.logger import logger
+from ..core.database import async_session_maker
+from .sensitive_words import filter_sensitive_words, check_sensitive_words
+from .providers import (
+    AIProvider,
+    AIResponse,
+    TokenUsage,
+    RotationStrategy,
+    OpenAICompatibleProvider,
+    ClaudeProvider,
+    GeminiProvider,
+    BaseAIProvider
+)
+from .cache import ai_response_cache
+from .config_service import config_service
 
 
-class AIProvider(str, Enum):
-    """AI提供商枚举"""
-    OPENAI = "openai"
-    DEEPSEEK = "deepseek"
-    CLAUDE = "claude"
-    GEMINI = "gemini"
-    QWEN = "qwen"
-    MOONSHOT = "moonshot"
-    OLLAMA = "ollama"
-    VOLCENGINE = "volcengine"
-    ALIBABA_BAILIAN = "alibaba_bailian"
-    SILICONFLOW = "siliconflow"
-    OPENROUTER = "openrouter"
+class AIProviderError(Exception):
+    """AI提供商错误"""
+    pass
 
 
-class RotationStrategy(str, Enum):
-    """轮询策略枚举"""
-    SEQUENTIAL = "sequential"  # 顺序轮询
-    RANDOM = "random"  # 随机轮询
+class NoAvailableProviderError(AIProviderError):
+    """没有可用提供商错误"""
+    pass
 
 
-class TokenUsage:
-    """Token使用量统计"""
-    def __init__(
-        self,
-        prompt_tokens: int = 0,
-        completion_tokens: int = 0,
-        total_tokens: int = 0
-    ):
-        self.prompt_tokens = prompt_tokens
-        self.completion_tokens = completion_tokens
-        self.total_tokens = total_tokens
-
-    def to_dict(self) -> Dict[str, int]:
-        return {
-            "prompt_tokens": self.prompt_tokens,
-            "completion_tokens": self.completion_tokens,
-            "total_tokens": self.total_tokens
-        }
-
-
-class AIResponse:
-    """AI响应结果"""
-    def __init__(
-        self,
-        content: str,
-        provider: AIProvider,
-        model: str,
-        token_usage: TokenUsage,
-        finish_reason: str = "stop",
-        metadata: Optional[Dict[str, Any]] = None
-    ):
-        self.content = content
-        self.provider = provider
-        self.model = model
-        self.token_usage = token_usage
-        self.finish_reason = finish_reason
-        self.metadata = metadata or {}
-        self.created_at = datetime.utcnow()
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "content": self.content,
-            "provider": self.provider.value,
-            "model": self.model,
-            "token_usage": self.token_usage.to_dict(),
-            "finish_reason": self.finish_reason,
-            "metadata": self.metadata,
-            "created_at": self.created_at.isoformat()
-        }
+# 提供商默认配置映射
+DEFAULT_PROVIDER_CONFIGS = {
+    AIProvider.OPENAI: {
+        "base_url": "https://api.openai.com/v1",
+        "model": "gpt-4-turbo-preview",
+        "env_key": "OPENAI_API_KEY"
+    },
+    AIProvider.DEEPSEEK: {
+        "base_url": "https://api.deepseek.com/v1",
+        "model": "deepseek-chat",
+        "env_key": "DEEPSEEK_API_KEY"
+    },
+    AIProvider.CLAUDE: {
+        "base_url": "https://api.anthropic.com/v1",
+        "model": "claude-3-opus-20240229",
+        "env_key": "CLAUDE_API_KEY"
+    },
+    AIProvider.GEMINI: {
+        "base_url": None,  # Gemini 使用特殊处理
+        "model": "gemini-pro",
+        "env_key": "GEMINI_API_KEY"
+    },
+    AIProvider.QWEN: {
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "model": "qwen-max",
+        "env_key": "QWEN_API_KEY"
+    },
+    AIProvider.MOONSHOT: {
+        "base_url": "https://api.moonshot.cn/v1",
+        "model": "moonshot-v1-8k",
+        "env_key": "MOONSHOT_API_KEY"
+    },
+    AIProvider.OLLAMA: {
+        "base_url": "http://localhost:11434/v1",
+        "model": "llama2",
+        "env_key": None  # Ollama 不需要 API Key
+    },
+    AIProvider.ZHIPU: {
+        "base_url": "https://open.bigmodel.cn/api/paas/v4",
+        "model": "glm-4-flash",
+        "env_key": "ZHIPU_API_KEY"
+    },
+}
 
 
 class UnifiedAIService:
-    """统一AI模型服务"""
+    """统一AI模型服务 - 重构版
+    
+    配置优先级：
+    1. 数据库配置（如果已配置且启用）
+    2. 环境变量配置（.env 文件）
+    3. 默认配置
+    """
 
     def __init__(self):
-        self.providers: Dict[AIProvider, Any] = {}
-        self.rotation_strategy = RotationStrategy(settings.AI_ROTATION_STRATEGY)
+        self.providers: Dict[AIProvider, BaseAIProvider] = {}
+        self.rotation_strategy = RotationStrategy.SEQUENTIAL
         self.current_provider_index = 0
-        self.enabled_providers = [
-            AIProvider(p) for p in settings.AI_ENABLED_PROVIDERS
+        self._initialized = False
+        self._db_configs: Dict[str, Dict[str, Any]] = {}
+
+    async def _load_db_configs(self) -> Dict[str, Dict[str, Any]]:
+        """从数据库加载AI提供商配置"""
+        try:
+            async with async_session_maker() as db:
+                db_configs = await config_service.get_all_provider_configs(db)
+                return {cfg["provider"]: cfg for cfg in db_configs if cfg.get("has_api_key")}
+        except Exception as e:
+            logger.warning(f"从数据库加载配置失败: {e}，将使用环境变量配置")
+            return {}
+
+    def _get_api_key(self, provider: AIProvider, default_config: Dict[str, Any]) -> Optional[str]:
+        """获取API密钥（优先从环境变量读取敏感信息）"""
+        env_key_name = default_config.get("env_key")
+        if env_key_name:
+            return getattr(settings, env_key_name, None)
+        return None
+
+    def _init_provider(self, provider_type: AIProvider, api_key: str, base_url: str, model: str):
+        """初始化单个提供商"""
+        if provider_type == AIProvider.GEMINI:
+            self.providers[provider_type] = GeminiProvider(
+                api_key=api_key,
+                default_model=model
+            )
+        elif provider_type == AIProvider.CLAUDE:
+            self.providers[provider_type] = ClaudeProvider(
+                api_key=api_key,
+                base_url=base_url,
+                default_model=model
+            )
+        else:
+            # OpenAI 兼容格式
+            needs_api_key = provider_type != AIProvider.OLLAMA
+            self.providers[provider_type] = OpenAICompatibleProvider(
+                provider_type=provider_type,
+                api_key=api_key,
+                base_url=base_url,
+                default_model=model,
+                needs_api_key=needs_api_key
+            )
+
+    async def initialize(self):
+        """初始化所有提供商（优先从数据库读取配置）"""
+        if self._initialized:
+            return
+
+        # 从数据库加载配置
+        self._db_configs = await self._load_db_configs()
+        
+        if self._db_configs:
+            logger.info(f"从数据库加载了 {len(self._db_configs)} 个AI提供商配置")
+
+        # 初始化所有支持的提供商
+        for provider_type, default_config in DEFAULT_PROVIDER_CONFIGS.items():
+            provider_id = provider_type.value
+            
+            # 检查数据库配置
+            db_config = self._db_configs.get(provider_id)
+            
+            if db_config and db_config.get("is_enabled"):
+                # 使用数据库配置（URL和模型），但API Key从环境变量读取
+                api_key = self._get_api_key(provider_type, default_config)
+                if api_key or provider_type == AIProvider.OLLAMA:
+                    base_url = db_config.get("base_url") or default_config["base_url"]
+                    model = db_config.get("model") or default_config["model"]
+                    self._init_provider(provider_type, api_key, base_url, model)
+                    logger.info(f"已初始化 {provider_id}（使用数据库配置）")
+            else:
+                # 使用环境变量配置
+                api_key = self._get_api_key(provider_type, default_config)
+                if api_key or provider_type == AIProvider.OLLAMA:
+                    base_url = default_config["base_url"]
+                    model = default_config["model"]
+                    self._init_provider(provider_type, api_key, base_url, model)
+
+        self._initialized = True
+        available_count = len([p for p in self.providers.values() if p.is_available])
+        logger.info(f"UnifiedAIService 初始化完成，{available_count} 个提供商可用")
+
+    async def reload_configs(self):
+        """重新加载配置（用于配置更新后）"""
+        logger.info("重新加载AI提供商配置...")
+        self._initialized = False
+        self.providers.clear()
+        await self.initialize()
+
+    def _get_available_providers(self) -> List[AIProvider]:
+        """获取所有可用的提供商"""
+        return [
+            provider_type for provider_type, provider in self.providers.items()
+            if provider.is_available
         ]
-        self.http_client = httpx.AsyncClient(timeout=60.0)
-        
-        # 初始化所有提供商
-        self._initialize_providers()
-        
-        logger.info(f"UnifiedAIService initialized with {len(self.providers)} providers")
 
-    def _initialize_providers(self):
-        """初始化所有AI提供商"""
-        # OpenAI
-        if settings.OPENAI_API_KEY:
-            self.providers[AIProvider.OPENAI] = AsyncOpenAI(
-                api_key=settings.OPENAI_API_KEY,
-                base_url=settings.OPENAI_BASE_URL
-            )
-            logger.info("OpenAI provider initialized")
-
-        # DeepSeek
-        if settings.DEEPSEEK_API_KEY:
-            self.providers[AIProvider.DEEPSEEK] = AsyncOpenAI(
-                api_key=settings.DEEPSEEK_API_KEY,
-                base_url=settings.DEEPSEEK_BASE_URL
-            )
-            logger.info("DeepSeek provider initialized")
-
-        # Claude
-        if settings.CLAUDE_API_KEY:
-            self.providers[AIProvider.CLAUDE] = anthropic.AsyncAnthropic(
-                api_key=settings.CLAUDE_API_KEY,
-                base_url=settings.CLAUDE_BASE_URL
-            )
-            logger.info("Claude provider initialized")
-
-        # Gemini
-        if settings.GEMINI_API_KEY:
-            self.providers[AIProvider.GEMINI] = {
-                "api_key": settings.GEMINI_API_KEY,
-                "model": settings.GEMINI_MODEL
-            }
-            logger.info("Gemini provider initialized")
-
-        # Qwen (阿里云百炼)
-        if settings.QWEN_API_KEY:
-            self.providers[AIProvider.QWEN] = AsyncOpenAI(
-                api_key=settings.QWEN_API_KEY,
-                base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
-            )
-            logger.info("Qwen provider initialized")
-
-        # Moonshot
-        if settings.MOONSHOT_API_KEY:
-            self.providers[AIProvider.MOONSHOT] = AsyncOpenAI(
-                api_key=settings.MOONSHOT_API_KEY,
-                base_url=settings.MOONSHOT_BASE_URL
-            )
-            logger.info("Moonshot provider initialized")
-
-        # Ollama
-        self.providers[AIProvider.OLLAMA] = AsyncOpenAI(
-            base_url=settings.OLLAMA_BASE_URL,
-            api_key="ollama"  # Ollama不需要API key
-        )
-        logger.info("Ollama provider initialized")
-
-        # 火山引擎
-        if settings.VOLCENGINE_API_KEY:
-            self.providers[AIProvider.VOLCENGINE] = AsyncOpenAI(
-                api_key=settings.VOLCENGINE_API_KEY,
-                base_url=settings.VOLCENGINE_BASE_URL
-            )
-            logger.info("Volcengine provider initialized")
-
-        # 阿里云百炼
-        if settings.ALIBABA_BAILIAN_API_KEY:
-            self.providers[AIProvider.ALIBABA_BAILIAN] = AsyncOpenAI(
-                api_key=settings.ALIBABA_BAILIAN_API_KEY,
-                base_url=settings.ALIBABA_BAILIAN_BASE_URL
-            )
-            logger.info("Alibaba Bailian provider initialized")
-
-        # 硅基流动
-        if settings.SILICONFLOW_API_KEY:
-            self.providers[AIProvider.SILICONFLOW] = AsyncOpenAI(
-                api_key=settings.SILICONFLOW_API_KEY,
-                base_url=settings.SILICONFLOW_BASE_URL
-            )
-            logger.info("SiliconFlow provider initialized")
-
-        # OpenRouter
-        if settings.OPENROUTER_API_KEY:
-            self.providers[AIProvider.OPENROUTER] = AsyncOpenAI(
-                api_key=settings.OPENROUTER_API_KEY,
-                base_url=settings.OPENROUTER_BASE_URL
-            )
-            logger.info("OpenRouter provider initialized")
-
-    def _get_next_provider(self) -> Optional[AIProvider]:
+    def _get_next_provider(self) -> AIProvider | None:
         """获取下一个提供商（根据轮询策略）"""
-        available_providers = [
-            p for p in self.enabled_providers 
-            if p in self.providers
-        ]
-        
-        if not available_providers:
-            logger.error("No available providers")
+        available = self._get_available_providers()
+
+        if not available:
+            logger.error("没有可用的AI提供商")
             return None
 
         if self.rotation_strategy == RotationStrategy.SEQUENTIAL:
-            provider = available_providers[self.current_provider_index % len(available_providers)]
+            provider = available[self.current_provider_index % len(available)]
             self.current_provider_index += 1
         else:  # RANDOM
-            provider = random.choice(available_providers)
+            provider = random.choice(available)
 
-        logger.info(f"Selected provider: {provider.value} (strategy: {self.rotation_strategy.value})")
+        logger.debug(f"选择提供商: {provider.value} (策略: {self.rotation_strategy.value})")
         return provider
 
     def _count_tokens(self, text: str, model: str = "gpt-4") -> int:
@@ -220,306 +214,214 @@ class UnifiedAIService:
             encoding = tiktoken.encoding_for_model(model)
             return len(encoding.encode(text))
         except Exception:
-            # 如果模型不支持，使用默认编码
             try:
                 encoding = tiktoken.get_encoding("cl100k_base")
                 return len(encoding.encode(text))
             except Exception as e:
-                logger.warning(f"Failed to count tokens: {e}")
-                # 粗略估算：1个token约等于4个字符（英文）或1.5个汉字
+                logger.warning(f"Token计算失败: {e}")
                 return len(text) // 3
 
-    async def _call_openai_compatible(
-        self,
-        provider: AIProvider,
-        messages: List[Dict[str, str]],
-        model: str,
-        temperature: float = 0.7,
-        max_tokens: int = 4000
-    ) -> AIResponse:
-        """调用OpenAI兼容的API"""
-        client = self.providers[provider]
-        
-        response = await client.chat.completions.create(
-            model=model,
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens
-        )
-
-        content = response.choices[0].message.content
-        token_usage = TokenUsage(
-            prompt_tokens=response.usage.prompt_tokens,
-            completion_tokens=response.usage.completion_tokens,
-            total_tokens=response.usage.total_tokens
-        )
-
-        return AIResponse(
-            content=content,
-            provider=provider,
-            model=model,
-            token_usage=token_usage,
-            finish_reason=response.choices[0].finish_reason
-        )
-
-    async def _call_claude(
+    def _generate_cache_key(
         self,
         messages: List[Dict[str, str]],
-        model: str,
-        temperature: float = 0.7,
-        max_tokens: int = 4000
-    ) -> AIResponse:
-        """调用Claude API"""
-        client = self.providers[AIProvider.CLAUDE]
-        
-        # 转换消息格式
-        system_message = None
-        user_messages = []
-        
-        for msg in messages:
-            if msg["role"] == "system":
-                system_message = msg["content"]
-            else:
-                user_messages.append(msg)
-
-        response = await client.messages.create(
-            model=model,
-            system=system_message,
-            messages=user_messages,
-            max_tokens=max_tokens,
-            temperature=temperature
-        )
-
-        content = response.content[0].text
-        token_usage = TokenUsage(
-            prompt_tokens=response.usage.input_tokens,
-            completion_tokens=response.usage.output_tokens,
-            total_tokens=response.usage.input_tokens + response.usage.output_tokens
-        )
-
-        return AIResponse(
-            content=content,
-            provider=AIProvider.CLAUDE,
-            model=model,
-            token_usage=token_usage,
-            finish_reason=response.stop_reason
-        )
-
-    async def _call_gemini(
-        self,
-        messages: List[Dict[str, str]],
-        model: str,
-        temperature: float = 0.7,
-        max_tokens: int = 4000
-    ) -> AIResponse:
-        """调用Gemini API"""
-        config = self.providers[AIProvider.GEMINI]
-        
-        # 转换消息格式
-        contents = [{"parts": [{"text": msg["content"]}]} for msg in messages]
-        
-        response = await self.http_client.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={config['api_key']}",
-            json={
-                "contents": contents,
-                "generationConfig": {
-                    "temperature": temperature,
-                    "maxOutputTokens": max_tokens
-                }
-            }
-        )
-
-        response.raise_for_status()
-        data = response.json()
-        
-        content = data["candidates"][0]["content"]["parts"][0]["text"]
-        
-        # Gemini不返回精确的token数，使用估算
-        prompt_text = " ".join([msg["content"] for msg in messages])
-        prompt_tokens = self._count_tokens(prompt_text)
-        completion_tokens = self._count_tokens(content)
-        
-        token_usage = TokenUsage(
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            total_tokens=prompt_tokens + completion_tokens
-        )
-
-        return AIResponse(
-            content=content,
-            provider=AIProvider.GEMINI,
-            model=model,
-            token_usage=token_usage,
-            finish_reason="stop"
+        provider: AIProvider | None,
+        model: str | None,
+        temperature: float,
+        max_tokens: int
+    ) -> str:
+        """生成缓存键"""
+        return ai_response_cache._generate_key(
+            "ai_generate",
+            messages,
+            provider.value if provider else "auto",
+            model or "default",
+            temperature,
+            max_tokens
         )
 
     async def generate(
         self,
         messages: List[Dict[str, str]],
-        provider: Optional[AIProvider] = None,
-        model: Optional[str] = None,
+        provider: AIProvider | None = None,
+        model: str | None = None,
         temperature: float = 0.7,
         max_tokens: int = 4000,
-        max_retries: int = 3
+        max_retries: int = 3,
+        use_cache: bool = True
     ) -> AIResponse:
         """
-        生成AI响应（支持轮询和重试）
-        
-        Args:
-            messages: 消息列表
-            provider: 指定提供商（可选，不指定则使用轮询）
-            model: 指定模型（可选）
-            temperature: 温度参数
-            max_tokens: 最大token数
-            max_retries: 最大重试次数
-            
-        Returns:
-            AIResponse: AI响应结果
-        """
-        last_error = None
-        
-        for attempt in range(max_retries):
-            try:
-                # 如果没有指定提供商，使用轮询策略
-                if provider is None:
-                    provider = self._get_next_provider()
-                    if provider is None:
-                        raise ValueError("No available AI providers")
-                
-                # 获取模型
-                if model is None:
-                    model = self._get_default_model(provider)
-                
-                logger.info(f"Calling {provider.value} with model {model} (attempt {attempt + 1}/{max_retries})")
-                
-                # 根据提供商调用不同的API
-                if provider == AIProvider.CLAUDE:
-                    response = await self._call_claude(messages, model, temperature, max_tokens)
-                elif provider == AIProvider.GEMINI:
-                    response = await self._call_gemini(messages, model, temperature, max_tokens)
-                else:
-                    # OpenAI兼容的API
-                    response = await self._call_openai_compatible(provider, messages, model, temperature, max_tokens)
-                
-                logger.info(f"Successfully generated response from {provider.value}")
-                return response
-                
-            except Exception as e:
-                last_error = e
-                logger.error(f"Error calling {provider.value if provider else 'provider'}: {str(e)}")
-                
-                # 如果是指定的提供商失败，不重试
-                if provider is not None:
-                    raise
-                
-                # 如果是轮询，尝试下一个提供商
-                logger.info(f"Retrying with next provider...")
-                await asyncio.sleep(1)  # 等待1秒后重试
-        
-        # 所有重试都失败
-        raise Exception(f"Failed to generate response after {max_retries} attempts. Last error: {last_error}")
+        生成AI响应（支持轮询、重试和缓存）
 
-    def _get_default_model(self, provider: AIProvider) -> str:
-        """获取提供商的默认模型"""
-        model_map = {
-            AIProvider.OPENAI: settings.OPENAI_MODEL,
-            AIProvider.DEEPSEEK: settings.DEEPSEEK_MODEL,
-            AIProvider.CLAUDE: settings.CLAUDE_MODEL,
-            AIProvider.GEMINI: settings.GEMINI_MODEL,
-            AIProvider.QWEN: settings.QWEN_MODEL,
-            AIProvider.MOONSHOT: settings.MOONSHOT_MODEL,
-            AIProvider.OLLAMA: settings.OLLAMA_MODEL,
-            AIProvider.VOLCENGINE: settings.VOLCENGINE_MODEL,
-            AIProvider.ALIBABA_BAILIAN: settings.ALIBABA_BAILIAN_MODEL,
-            AIProvider.SILICONFLOW: settings.SILICONFLOW_MODEL,
-            AIProvider.OPENROUTER: settings.OPENROUTER_MODEL,
-        }
-        return model_map.get(provider, "gpt-3.5-turbo")
-
-    async def generate_stream(
-        self,
-        messages: List[Dict[str, str]],
-        provider: Optional[AIProvider] = None,
-        model: Optional[str] = None,
-        temperature: float = 0.7,
-        max_tokens: int = 4000
-    ) -> AsyncGenerator[str, None]:
-        """
-        流式生成AI响应
-        
         Args:
             messages: 消息列表
             provider: 指定提供商（可选）
             model: 指定模型（可选）
             temperature: 温度参数
             max_tokens: 最大token数
-            
+            max_retries: 最大重试次数
+            use_cache: 是否使用缓存
+
+        Returns:
+            AIResponse: AI响应结果
+        """
+        if not self._initialized:
+            await self.initialize()
+
+        # 检查缓存
+        if use_cache:
+            cache_key = self._generate_cache_key(messages, provider, model, temperature, max_tokens)
+            cached_response = ai_response_cache.get(cache_key)
+            if cached_response:
+                logger.info(f"缓存命中，返回缓存的响应")
+                return cached_response
+
+        last_error = None
+        specified_provider = provider
+
+        for attempt in range(max_retries):
+            try:
+                # 如果没有指定提供商，使用轮询策略
+                if specified_provider is None:
+                    provider = self._get_next_provider()
+                    if provider is None:
+                        raise NoAvailableProviderError("没有可用的AI提供商")
+
+                provider_instance = self.providers.get(provider)
+                if not provider_instance or not provider_instance.is_available:
+                    logger.warning(f"提供商 {provider.value} 不可用，尝试下一个")
+                    continue
+
+                # 获取模型
+                if model is None:
+                    model = provider_instance.get_default_model()
+
+                logger.info(f"调用 {provider.value}，模型: {model} (尝试 {attempt + 1}/{max_retries})")
+
+                # 调用提供商生成响应
+                response = await provider_instance.generate(
+                    messages=messages,
+                    model=model,
+                    temperature=temperature,
+                    max_tokens=max_tokens
+                )
+
+                # 过滤敏感词
+                sensitive_words = check_sensitive_words(response.content)
+                if sensitive_words:
+                    logger.info(f"检测到敏感词: {', '.join(sensitive_words)}")
+
+                filtered_content = filter_sensitive_words(response.content)
+                response.content = filtered_content
+                response.metadata = {
+                    "sensitive_words_filtered": len(sensitive_words),
+                    "sensitive_words_list": sensitive_words
+                }
+
+                # 存入缓存
+                if use_cache:
+                    ai_response_cache.set(cache_key, response)
+
+                return response
+
+            except Exception as e:
+                last_error = e
+                logger.error(f"调用 {provider.value if provider else '未知提供商'} 失败: {str(e)}")
+
+                # 如果是指定的提供商失败，不重试
+                if specified_provider is not None:
+                    raise AIProviderError(f"指定的提供商 {specified_provider.value} 调用失败: {e}")
+
+                # 等待后重试
+                await asyncio.sleep(1 * (attempt + 1))
+
+        # 所有重试都失败
+        raise AIProviderError(f"经过 {max_retries} 次尝试后仍然失败。最后错误: {last_error}")
+
+    async def generate_stream(
+        self,
+        messages: List[Dict[str, str]],
+        provider: AIProvider | None = None,
+        model: str | None = None,
+        temperature: float = 0.7,
+        max_tokens: int = 4000
+    ) -> AsyncGenerator[str, None]:
+        """
+        流式生成AI响应
+
+        Args:
+            messages: 消息列表
+            provider: 指定提供商（可选）
+            model: 指定模型（可选）
+            temperature: 温度参数
+            max_tokens: 最大token数
+
         Yields:
             str: 生成的文本片段
         """
-        # 获取提供商
+        if not self._initialized:
+            await self.initialize()
+
         if provider is None:
             provider = self._get_next_provider()
-        
+
         if provider is None:
-            raise ValueError("No available AI providers")
-        
-        # 获取模型
+            raise NoAvailableProviderError("没有可用的AI提供商")
+
+        provider_instance = self.providers.get(provider)
+        if not provider_instance:
+            raise AIProviderError(f"未知的提供商: {provider.value}")
+
         if model is None:
-            model = self._get_default_model(provider)
-        
-        # 只支持OpenAI兼容的API的流式输出
-        if provider in [AIProvider.CLAUDE, AIProvider.GEMINI]:
-            # 对于不支持流式的提供商，先生成完整响应，然后逐字返回
-            response = await self.generate(messages, provider, model, temperature, max_tokens)
-            for char in response.content:
-                yield char
-                await asyncio.sleep(0.01)
-            return
-        
-        # OpenAI兼容的流式输出
-        client = self.providers[provider]
-        
-        try:
-            stream = await client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                stream=True
-            )
-            
-            async for chunk in stream:
-                if chunk.choices[0].delta.content:
-                    yield chunk.choices[0].delta.content
-                    
-        except Exception as e:
-            logger.error(f"Error in stream generation: {str(e)}")
-            raise
+            model = provider_instance.get_default_model()
+
+        async for chunk in provider_instance.generate_stream(
+            messages=messages,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens
+        ):
+            yield chunk
 
     def get_available_providers(self) -> List[Dict[str, Any]]:
         """获取所有可用的提供商"""
-        providers = []
-        for provider in AIProvider:
-            is_available = provider in self.providers
-            providers.append({
-                "name": provider.value,
-                "display_name": provider.value.replace("_", " ").title(),
+        if not self._initialized:
+            asyncio.create_task(self.initialize())
+
+        result = []
+        for provider_type in AIProvider:
+            provider = self.providers.get(provider_type)
+            is_available = provider.is_available if provider else False
+            result.append({
+                "name": provider_type.value,
+                "display_name": provider_type.value.replace("_", " ").title(),
                 "available": is_available,
-                "default_model": self._get_default_model(provider) if is_available else None
+                "default_model": provider.get_default_model() if is_available else None
             })
-        return providers
+        return result
 
     def set_rotation_strategy(self, strategy: RotationStrategy):
         """设置轮询策略"""
         self.rotation_strategy = strategy
         self.current_provider_index = 0
-        logger.info(f"Rotation strategy set to: {strategy.value}")
+        logger.info(f"轮询策略已设置为: {strategy.value}")
+
+    def clear_cache(self):
+        """清空AI响应缓存"""
+        ai_response_cache.clear()
+
+    def get_cache_stats(self) -> Dict[str, Any]:
+        """获取缓存统计"""
+        return ai_response_cache.get_stats()
 
     async def close(self):
-        """关闭所有连接"""
-        await self.http_client.aclose()
-        logger.info("UnifiedAIService closed")
+        """关闭所有提供商连接"""
+        for provider in self.providers.values():
+            try:
+                await provider.close()
+            except Exception as e:
+                logger.warning(f"关闭提供商连接失败: {e}")
+
+        logger.info("UnifiedAIService 已关闭")
 
 
 # 全局实例

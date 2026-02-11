@@ -1,303 +1,488 @@
+"""
+微信发布服务（增强版）
+支持自动发布到微信公众号，包括图文消息、草稿、定时发布等
+"""
+
 from typing import Optional, Dict, Any, List
 import httpx
-from datetime import datetime, timedelta
+from datetime import datetime
 from ..core.config import settings
 from ..core.logger import logger
+from ..models.wechat import WeChatConfig
+from .markdown_converter import markdown_converter
 
 
-class WeChatService:
-    """
-    WeChat official account API service.
-    """
+class WeChatPublishService:
+    """微信发布服务 - 增强版"""
 
-    def __init__(self, app_id: Optional[str] = None, app_secret: Optional[str] = None):
-        self.app_id = app_id or settings.WECHAT_APP_ID
-        self.app_secret = app_secret or settings.WECHAT_APP_SECRET
-        self.access_token = None
-        self.token_expires_at = None
-        self.http_client = httpx.AsyncClient(timeout=30.0)
+    def __init__(self):
+        # 增强HTTP客户端配置
+        # 明确禁用代理，避免代理配置问题
+        self.http_client = httpx.AsyncClient(
+            verify=False,  # 避免SSL证书验证问题
+            timeout=httpx.Timeout(120.0, connect=10.0, read=60.0, write=60.0),
+            follow_redirects=True,
+            limits=httpx.Limits(
+                max_keepalive_connections=5,
+                max_connections=10,
+                keepalive_expiry=30.0
+            ),
+            # 明确禁用代理
+            trust_env=False
+        )
 
-    async def get_access_token(self) -> str:
+    async def get_access_token(self, app_id: str, app_secret: str) -> str:
         """
-        Get WeChat access token, caching it until expiration.
-        """
-        # Check if token is still valid
-        if self.access_token and self.token_expires_at:
-            if datetime.now() < self.token_expires_at:
-                return self.access_token
+        获取微信access_token
 
-        # Fetch new token
+        Args:
+            app_id: 公众号AppID
+            app_secret: 公众号AppSecret
+
+        Returns:
+            access_token
+        """
         try:
+            # 使用域名连接，不要使用IP地址（SSL证书需要域名验证）
             url = "https://api.weixin.qq.com/cgi-bin/token"
             params = {
                 "grant_type": "client_credential",
-                "appid": self.app_id,
-                "secret": self.app_secret
+                "appid": app_id,
+                "secret": app_secret
             }
+
+            logger.info(f"开始获取微信access_token: {url}")
+            logger.info(f"AppID: {app_id}")
 
             response = await self.http_client.get(url, params=params)
             response.raise_for_status()
             data = response.json()
 
-            if "errcode" in data:
-                logger.error(f"WeChat API error: {data}")
-                raise Exception(f"WeChat API error: {data.get('errmsg', 'Unknown error')}")
+            logger.info(f"获取access_token响应: {data}")
 
-            self.access_token = data["access_token"]
-            expires_in = data.get("expires_in", 7200)
-            self.token_expires_at = datetime.now() + timedelta(seconds=expires_in - 300)  # Refresh 5 minutes before expiration
+            if "access_token" not in data:
+                raise ValueError(f"获取access_token失败: {data}")
 
-            logger.info("WeChat access token refreshed successfully")
-            return self.access_token
+            logger.info(f"获取access_token成功")
+            return data["access_token"]
 
+        except httpx.ConnectError as e:
+            logger.error(f"连接微信API失败: {str(e)}")
+            logger.error(f"请检查网络连接和代理配置")
+            raise ValueError(f"无法连接到微信API服务器: {str(e)}")
+        except httpx.TimeoutException as e:
+            logger.error(f"连接微信API超时: {str(e)}")
+            raise ValueError(f"连接微信API超时，请重试: {str(e)}")
         except Exception as e:
-            logger.error(f"Error getting WeChat access token: {str(e)}")
-            raise
+            logger.error(f"获取access_token失败: {str(e)}")
+            logger.error(f"错误类型: {type(e).__name__}")
+            logger.error(f"请检查微信公众号AppID和AppSecret配置是否正确")
+            raise ValueError(f"获取微信access_token失败: {str(e)}")
 
     async def upload_media(
         self,
-        file_path: str,
-        media_type: str = "image"
-    ) -> Dict[str, Any]:
+        access_token: str,
+        media_type: str,
+        file_path: str
+    ) -> str:
         """
-        Upload media file to WeChat server.
+        上传临时素材
 
         Args:
-            file_path: Path to the media file
-            media_type: Type of media (image, video, voice, thumb)
+            access_token: access_token
+            media_type: 媒体类型（image/voice/video/thumb）
+            file_path: 文件路径
 
         Returns:
-            Dict containing media_id and other metadata
+            media_id
         """
         try:
-            access_token = await self.get_access_token()
-            url = f"https://api.weixin.qq.com/cgi-bin/material/add_material?access_token={access_token}&type={media_type}"
+            url = f"https://api.weixin.qq.com/cgi-bin/media/upload?access_token={access_token}&type={media_type}"
 
-            with open(file_path, "rb") as f:
+            with open(file_path, 'rb') as f:
                 files = {"media": f}
                 response = await self.http_client.post(url, files=files)
                 response.raise_for_status()
                 data = response.json()
 
-            if "errcode" in data and data["errcode"] != 0:
-                logger.error(f"WeChat upload error: {data}")
-                raise Exception(f"Upload failed: {data.get('errmsg', 'Unknown error')}")
+            if "media_id" not in data:
+                raise ValueError(f"上传素材失败: {data}")
 
-            logger.info(f"Media uploaded successfully: {data.get('media_id')}")
-            return data
+            return data["media_id"]
 
         except Exception as e:
-            logger.error(f"Error uploading media: {str(e)}")
-            raise
+            logger.error(f"上传素材失败: {str(e)}")
+            logger.error(f"文件路径: {file_path}, 媒体类型: {media_type}")
+            logger.error(f"错误类型: {type(e).__name__}")
+            raise ValueError(f"上传微信素材失败: {str(e)}")
 
-    async def upload_image_from_url(
+    async def upload_permanent_material(
         self,
-        image_url: str
-    ) -> Dict[str, Any]:
+        access_token: str,
+        media_type: str,
+        file_path: str,
+        description: Optional[Dict[str, Any]] = None
+    ) -> str:
         """
-        Download image from URL and upload to WeChat.
+        上传永久素材
 
         Args:
-            image_url: URL of the image to upload
+            access_token: access_token
+            media_type: 媒体类型
+            file_path: 文件路径
+            description: 描述信息
 
         Returns:
-            Dict containing media_id
+            media_id
         """
         try:
-            # Download image
-            response = await self.http_client.get(image_url)
-            response.raise_for_status()
-            image_data = response.content
+            url = f"https://api.weixin.qq.com/cgi-bin/material/add_material?access_token={access_token}&type={media_type}"
 
-            # Upload to WeChat
-            access_token = await self.get_access_token()
-            url = f"https://api.weixin.qq.com/cgi-bin/material/add_material?access_token={access_token}&type=image"
+            import json
+            files = {
+                "media": open(file_path, 'rb')
+            }
 
-            files = {"media": ("image.jpg", image_data, "image/jpeg")}
+            if description:
+                files["description"] = (None, json.dumps(description), 'application/json')
+
             response = await self.http_client.post(url, files=files)
             response.raise_for_status()
             data = response.json()
 
-            if "errcode" in data and data["errcode"] != 0:
-                logger.error(f"WeChat upload error: {data}")
-                raise Exception(f"Upload failed: {data.get('errmsg', 'Unknown error')}")
+            if "media_id" not in data:
+                raise ValueError(f"上传永久素材失败: {data}")
 
-            logger.info(f"Image uploaded successfully: {data.get('media_id')}")
-            return data
+            return data["media_id"]
 
         except Exception as e:
-            logger.error(f"Error uploading image from URL: {str(e)}")
-            raise
+            logger.error(f"上传永久素材失败: {str(e)}")
+            logger.error(f"文件路径: {file_path}, 媒体类型: {media_type}")
+            logger.error(f"错误类型: {type(e).__name__}")
+            raise ValueError(f"上传微信永久素材失败: {str(e)}")
 
     async def create_draft(
         self,
-        articles: List[Dict[str, Any]]
-    ) -> Dict[str, Any]:
+        access_token: str,
+        title: str,
+        author: str,
+        digest: str,
+        content: str,
+        cover_media_id: str,
+        content_source_url: str = "",
+        need_open_comment: int = 0,
+        only_fans_can_comment: int = 0
+    ) -> str:
         """
-        Create article draft in WeChat.
+        创建草稿
 
         Args:
-            articles: List of article dicts with title, content, author, digest, etc.
+            access_token: access_token
+            title: 标题
+            author: 作者
+            digest: 摘要
+            content: 正文内容（HTML格式）
+            cover_media_id: 封面图media_id
+            content_source_url: 原文链接
+            need_open_comment: 是否开启评论
+            only_fans_can_comment: 是否仅粉丝可评论
 
         Returns:
-            Dict containing media_id (draft_id)
+            draft_id (media_id)
         """
         try:
-            access_token = await self.get_access_token()
             url = f"https://api.weixin.qq.com/cgi-bin/draft/add?access_token={access_token}"
 
-            payload = {
-                "articles": articles
-            }
+            articles = [{
+                "title": title,
+                "author": author,
+                "digest": digest,
+                "content": content,
+                "content_source_url": content_source_url,
+                "thumb_media_id": cover_media_id,
+                "show_cover_pic": 1,
+                "need_open_comment": need_open_comment,
+                "only_fans_can_comment": only_fans_can_comment
+            }]
 
-            response = await self.http_client.post(url, json=payload)
+            data = {"articles": articles}
+            
+            logger.info(f"开始创建微信草稿: {title}")
+            logger.info(f"草稿URL: {url}")
+            logger.info(f"封面图media_id: {cover_media_id}")
+            logger.info(f"内容长度: {len(content)} 字符")
+
+            response = await self.http_client.post(url, json=data)
             response.raise_for_status()
-            data = response.json()
+            result = response.json()
 
-            if "errcode" in data and data["errcode"] != 0:
-                logger.error(f"WeChat draft creation error: {data}")
-                raise Exception(f"Draft creation failed: {data.get('errmsg', 'Unknown error')}")
+            logger.info(f"创建草稿响应: {result}")
 
-            logger.info(f"Draft created successfully: {data.get('media_id')}")
-            return data
+            if "media_id" not in result:
+                raise ValueError(f"创建草稿失败: {result}")
 
+            logger.info(f"创建草稿成功: {result['media_id']}")
+            return result["media_id"]
+
+        except httpx.ConnectError as e:
+            logger.error(f"连接微信API失败: {str(e)}")
+            logger.error(f"请检查网络连接和代理配置")
+            raise ValueError(f"无法连接到微信API服务器: {str(e)}")
+        except httpx.TimeoutException as e:
+            logger.error(f"连接微信API超时: {str(e)}")
+            raise ValueError(f"连接微信API超时，请重试: {str(e)}")
         except Exception as e:
-            logger.error(f"Error creating draft: {str(e)}")
-            raise
+            logger.error(f"创建草稿失败: {str(e)}")
+            logger.error(f"错误类型: {type(e).__name__}")
+            logger.error(f"请检查微信API配置和草稿内容格式")
+            raise ValueError(f"创建微信草稿失败: {str(e)}")
 
     async def publish_article(
         self,
-        media_id: str
+        access_token: str,
+        draft_id: str,
+        is_to_all: bool = False,
+        tag_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """
-        Publish article from draft.
+        发布文章（从草稿）
 
         Args:
-            media_id: Draft media_id
+            access_token: access_token
+            draft_id: 草稿ID
+            is_to_all: 是否群发给所有人
+            tag_id: 标签ID（用于分组发送）
 
         Returns:
-            Dict containing publish_id and article_id
+            发布结果
         """
         try:
-            access_token = await self.get_access_token()
             url = f"https://api.weixin.qq.com/cgi-bin/freepublish/submit?access_token={access_token}"
 
-            payload = {
-                "media_id": media_id
+            data = {
+                "media_id": draft_id
             }
 
-            response = await self.http_client.post(url, json=payload)
+            # 如果不是群发给所有人，需要设置标签
+            if not is_to_all:
+                if tag_id is None:
+                    raise ValueError("非群发需要指定tag_id")
+                data["send_ignore_reprint"] = 0
+
+            response = await self.http_client.post(url, json=data)
             response.raise_for_status()
-            data = response.json()
+            result = response.json()
 
-            if "errcode" in data and data["errcode"] != 0:
-                logger.error(f"WeChat publish error: {data}")
-                raise Exception(f"Publish failed: {data.get('errmsg', 'Unknown error')}")
+            if "msg_id" not in result:
+                raise ValueError(f"发布文章失败: {result}")
 
-            logger.info(f"Article published successfully: {data.get('publish_id')}")
-            return data
+            return result
 
         except Exception as e:
-            logger.error(f"Error publishing article: {str(e)}")
-            raise
+            logger.error(f"发布文章失败: {str(e)}")
+            logger.error(f"草稿ID: {draft_id}, 错误类型: {type(e).__name__}")
+            raise ValueError(f"发布微信文章失败: {str(e)}")
 
     async def get_publish_status(
         self,
+        access_token: str,
         publish_id: str
     ) -> Dict[str, Any]:
         """
-        Get article publish status.
+        获取发布状态
 
         Args:
-            publish_id: Publish ID returned from submit
+            access_token: access_token
+            publish_id: 发布ID
 
         Returns:
-            Dict containing publish status and article_id if published
+            发布状态
         """
         try:
-            access_token = await self.get_access_token()
             url = f"https://api.weixin.qq.com/cgi-bin/freepublish/get?access_token={access_token}"
 
-            payload = {
-                "publish_id": publish_id
-            }
-
-            response = await self.http_client.post(url, json=payload)
+            data = {"publish_id": publish_id}
+            response = await self.http_client.post(url, json=data)
             response.raise_for_status()
-            data = response.json()
+            result = response.json()
 
-            if "errcode" in data and data["errcode"] != 0:
-                logger.error(f"WeChat get status error: {data}")
-                raise Exception(f"Get status failed: {data.get('errmsg', 'Unknown error')}")
-
-            return data
+            return result
 
         except Exception as e:
-            logger.error(f"Error getting publish status: {str(e)}")
-            raise
+            logger.error(f"获取发布状态失败: {str(e)}")
+            logger.error(f"发布ID: {publish_id}, 错误类型: {type(e).__name__}")
+            raise ValueError(f"获取微信文章发布状态失败: {str(e)}")
 
     async def delete_draft(
         self,
-        media_id: str
-    ) -> Dict[str, Any]:
+        access_token: str,
+        draft_id: str
+    ) -> bool:
         """
-        Delete article draft.
+        删除草稿
 
         Args:
-            media_id: Draft media_id
+            access_token: access_token
+            draft_id: 草稿ID
 
         Returns:
-            Dict containing result
+            是否成功
         """
         try:
-            access_token = await self.get_access_token()
             url = f"https://api.weixin.qq.com/cgi-bin/draft/delete?access_token={access_token}"
 
-            payload = {
-                "media_id": media_id
-            }
-
-            response = await self.http_client.post(url, json=payload)
+            data = {"media_id": draft_id}
+            response = await self.http_client.post(url, json=data)
             response.raise_for_status()
-            data = response.json()
+            result = response.json()
 
-            if "errcode" in data and data["errcode"] != 0:
-                logger.error(f"WeChat delete draft error: {data}")
-                raise Exception(f"Delete draft failed: {data.get('errmsg', 'Unknown error')}")
-
-            logger.info(f"Draft deleted successfully: {media_id}")
-            return data
+            return result.get("errcode") == 0
 
         except Exception as e:
-            logger.error(f"Error deleting draft: {str(e)}")
-            raise
+            logger.error(f"删除草稿失败: {str(e)}")
+            logger.error(f"草稿ID: {draft_id}, 错误类型: {type(e).__name__}")
+            raise ValueError(f"删除微信草稿失败: {str(e)}")
 
-    async def get_user_info(self) -> Dict[str, Any]:
+    async def auto_publish(
+        self,
+        app_id: str,
+        app_secret: str,
+        title: str,
+        author: str,
+        digest: str,
+        content: str,
+        cover_image_path: str,
+        is_to_all: bool = False,
+        tag_id: Optional[int] = None
+    ) -> Dict[str, Any]:
         """
-        Get WeChat account information.
+        自动发布文章（完整流程）
+
+        Args:
+            app_id: 公众号AppID
+            app_secret: 公众号AppSecret
+            title: 标题
+            author: 作者
+            digest: 摘要
+            content: 正文内容（HTML格式）
+            cover_image_path: 封面图片路径
+            is_to_all: 是否群发给所有人
+            tag_id: 标签ID
+
+        Returns:
+            发布结果
         """
         try:
-            access_token = await self.get_access_token()
-            url = f"https://api.weixin.qq.com/cgi-bin/account/getaccountbasicinfo?access_token={access_token}"
+            logger.info(f"开始自动发布文章: {title}")
 
-            response = await self.http_client.get(url)
-            response.raise_for_status()
-            data = response.json()
+            # 1. 获取access_token
+            access_token = await self.get_access_token(app_id, app_secret)
+            logger.info("获取access_token成功")
 
-            if "errcode" in data and data["errcode"] != 0:
-                logger.error(f"WeChat get account info error: {data}")
-                raise Exception(f"Get account info failed: {data.get('errmsg', 'Unknown error')}")
+            # 2. 上传封面图
+            cover_media_id = await self.upload_permanent_material(
+                access_token,
+                "image",
+                cover_image_path,
+                {"introduction": digest}
+            )
+            logger.info(f"上传封面图成功: {cover_media_id}")
 
-            return data
+            # 3. 创建草稿
+            draft_id = await self.create_draft(
+                access_token,
+                title,
+                author,
+                digest,
+                content,
+                cover_media_id
+            )
+            logger.info(f"创建草稿成功: {draft_id}")
+
+            # 4. 发布文章
+            publish_result = await self.publish_article(
+                access_token,
+                draft_id,
+                is_to_all=is_to_all,
+                tag_id=tag_id
+            )
+            logger.info(f"发布文章成功: {publish_result.get('msg_id')}")
+
+            return {
+                "success": True,
+                "draft_id": draft_id,
+                "publish_id": publish_result.get("publish_id"),
+                "msg_id": publish_result.get("msg_id"),
+                "msg_data_id": publish_result.get("msg_data_id")
+            }
 
         except Exception as e:
-            logger.error(f"Error getting user info: {str(e)}")
-            raise
+            logger.error(f"自动发布失败: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+
+    async def auto_publish_from_markdown(
+        self,
+        app_id: str,
+        app_secret: str,
+        title: str,
+        author: str,
+        markdown_content: str,
+        cover_image_path: str,
+        is_to_all: bool = False,
+        tag_id: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        从Markdown自动发布文章
+
+        Args:
+            app_id: 公众号AppID
+            app_secret: 公众号AppSecret
+            title: 标题
+            author: 作者
+            markdown_content: Markdown内容
+            cover_image_path: 封面图片路径
+            is_to_all: 是否群发给所有人
+            tag_id: 标签ID
+
+        Returns:
+            发布结果
+        """
+        try:
+            # 1. 转换Markdown为HTML（使用微信样式）
+            html_content = await markdown_converter.convert_to_wechat_html(markdown_content)
+
+            # 2. 生成摘要
+            digest = markdown_content[:120].replace("\n", " ").strip()
+
+            # 3. 自动发布
+            result = await self.auto_publish(
+                app_id,
+                app_secret,
+                title,
+                author,
+                digest,
+                html_content,
+                cover_image_path,
+                is_to_all,
+                tag_id
+            )
+
+            return result
+
+        except Exception as e:
+            logger.error(f"从Markdown自动发布失败: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
 
     async def close(self):
-        """Close HTTP client."""
+        """关闭HTTP客户端"""
         await self.http_client.aclose()
 
 
-# Global instance
-wechat_service = WeChatService()
+# 全局实例
+wechat_service = WeChatPublishService()

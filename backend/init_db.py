@@ -6,6 +6,19 @@ import asyncio
 from app.core.database import init_db, close_db
 from app.core.logger import logger
 
+# 导入所有模型以确保 Base.metadata 包含所有表定义
+from app.models import (
+    Article, ArticleStatus,
+    NewsItem, NewsSource,
+    WeChatConfig,
+    AppConfig,
+    Template,
+    Hotspot,
+    Task, TaskType, TaskStatus,
+    BatchJob, BatchJobType, BatchJobStatus,
+    AIProviderConfig
+)
+
 
 async def main():
     """主函数"""

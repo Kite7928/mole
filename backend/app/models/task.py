@@ -1,114 +1,99 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Enum, JSON, Text, Boolean
-from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
+"""
+定时任务数据模型
+"""
+
+from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, Enum as SQLEnum
+from datetime import datetime
+from enum import Enum
+import json
 from ..core.database import Base
-import enum
 
 
-class TaskStatus(str, enum.Enum):
+class TaskType(str, Enum):
+    """任务类型"""
+    GENERATE_ARTICLE = "generate_article"
+    PUBLISH_ARTICLE = "publish_article"
+    REFRESH_HOTSPOTS = "refresh_hotspots"
+    BATCH_GENERATE = "batch_generate"
+    BATCH_PUBLISH = "batch_publish"
+
+
+class TaskStatus(str, Enum):
+    """任务状态"""
     PENDING = "pending"
     RUNNING = "running"
-    SUCCESS = "success"
+    COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
 
 
-class TaskType(str, enum.Enum):
-    ARTICLE_GENERATION = "article_generation"
-    IMAGE_GENERATION = "image_generation"
-    NEWS_FETCH = "news_fetch"
-    WECHAT_PUBLISH = "wechat_publish"
-    DATA_SYNC = "data_sync"
-
-
 class Task(Base):
-    """
-    Task model for tracking async operations.
-    """
+    """定时任务模型"""
+
     __tablename__ = "tasks"
 
-    id = Column(Integer, primary_key=True, index=True)
-    task_id = Column(String(100), unique=True, nullable=False, index=True)  # Celery task ID
-    task_type = Column(Enum(TaskType), nullable=False, index=True)
-    status = Column(Enum(TaskStatus), default=TaskStatus.PENDING, index=True)
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    name = Column(String(200), nullable=False, comment="任务名称")
+    description = Column(Text, nullable=True, comment="任务描述")
+    task_type = Column(SQLEnum(TaskType), nullable=False, comment="任务类型")
+    status = Column(SQLEnum(TaskStatus), default=TaskStatus.PENDING, comment="任务状态")
 
-    # Task description and parameters
-    name = Column(String(200), nullable=False)
-    description = Column(Text, nullable=True)
-    parameters = Column(JSON, nullable=True)
+    # 任务配置
+    config = Column(Text, nullable=True, comment="任务配置（JSON格式）")
+    schedule_time = Column(DateTime, nullable=True, comment="计划执行时间")
+    cron_expression = Column(String(100), nullable=True, comment="Cron表达式")
 
-    # Task result
-    result = Column(JSON, nullable=True)
-    error_message = Column(Text, nullable=True)
-    error_traceback = Column(Text, nullable=True)
+    # 执行结果
+    result = Column(Text, nullable=True, comment="执行结果（JSON格式）")
+    error_message = Column(Text, nullable=True, comment="错误信息")
+    retry_count = Column(Integer, default=0, comment="重试次数")
+    max_retries = Column(Integer, default=3, comment="最大重试次数")
 
-    # Progress tracking
-    progress = Column(Integer, default=0)  # 0-100
-    current_step = Column(String(200), nullable=True)
-    total_steps = Column(Integer, nullable=True)
+    # 关联数据
+    article_id = Column(Integer, nullable=True, comment="关联文章ID")
+    batch_id = Column(Integer, nullable=True, comment="关联批量任务ID")
 
-    # Timing
-    started_at = Column(DateTime(timezone=True), nullable=True)
-    completed_at = Column(DateTime(timezone=True), nullable=True)
-    duration = Column(Integer, nullable=True)  # Duration in seconds
+    # 执行统计
+    total_runs = Column(Integer, default=0, comment="总执行次数")
+    success_runs = Column(Integer, default=0, comment="成功次数")
+    failed_runs = Column(Integer, default=0, comment="失败次数")
+    last_run_at = Column(DateTime, nullable=True, comment="最后执行时间")
+    next_run_at = Column(DateTime, nullable=True, comment="下次执行时间")
 
-    # Retry information
-    retry_count = Column(Integer, default=0)
-    max_retries = Column(Integer, default=3)
+    # 控制
+    is_enabled = Column(Boolean, default=True, comment="是否启用")
+    is_recurring = Column(Boolean, default=False, comment="是否循环执行")
 
-    # Priority and scheduling
-    priority = Column(Integer, default=5)  # 1-10, higher is more important
-    scheduled_at = Column(DateTime(timezone=True), nullable=True)
+    # 时间戳
+    created_at = Column(DateTime, default=datetime.utcnow, comment="创建时间")
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, comment="更新时间")
+    completed_at = Column(DateTime, nullable=True, comment="完成时间")
 
-    # Timestamps
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-
-    # Relationships
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
-    article_id = Column(Integer, ForeignKey("articles.id"), nullable=True)
-
-    # Relationships
-    user = relationship("User", back_populates="tasks")
-    article = relationship("Article", back_populates="tasks")
-
-    def __repr__(self):
-        return f"<Task(id={self.id}, task_id='{self.task_id}', type='{self.task_type}', status='{self.status}')>"
-
-
-class ScheduledTask(Base):
-    """
-    Scheduled task model for recurring operations.
-    """
-    __tablename__ = "scheduled_tasks"
-
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(200), nullable=False)
-    description = Column(Text, nullable=True)
-
-    # Schedule configuration
-    task_type = Column(Enum(TaskType), nullable=False)
-    cron_expression = Column(String(100), nullable=False)  # e.g., "0 */2 * * *" for every 2 hours
-    interval_seconds = Column(Integer, nullable=True)  # Alternative to cron
-
-    # Task parameters
-    parameters = Column(JSON, nullable=True)
-
-    # Execution settings
-    is_active = Column(Boolean, default=True)
-    run_immediately = Column(Boolean, default=False)
-    timezone = Column(String(50), default="Asia/Shanghai")
-
-    # Statistics
-    total_runs = Column(Integer, default=0)
-    successful_runs = Column(Integer, default=0)
-    failed_runs = Column(Integer, default=0)
-
-    # Timestamps
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    last_run_at = Column(DateTime(timezone=True), nullable=True)
-    next_run_at = Column(DateTime(timezone=True), nullable=True)
-
-    def __repr__(self):
-        return f"<ScheduledTask(id={self.id}, name='{self.name}', cron='{self.cron_expression}')>"
+    def to_dict(self):
+        """转换为字典"""
+        return {
+            "id": self.id,
+            "name": self.name,
+            "description": self.description,
+            "task_type": self.task_type.value if self.task_type else None,
+            "status": self.status.value if self.status else None,
+            "config": json.loads(self.config) if self.config else None,
+            "schedule_time": self.schedule_time.isoformat() if self.schedule_time else None,
+            "cron_expression": self.cron_expression,
+            "result": json.loads(self.result) if self.result else None,
+            "error_message": self.error_message,
+            "retry_count": self.retry_count,
+            "max_retries": self.max_retries,
+            "article_id": self.article_id,
+            "batch_id": self.batch_id,
+            "total_runs": self.total_runs,
+            "success_runs": self.success_runs,
+            "failed_runs": self.failed_runs,
+            "last_run_at": self.last_run_at.isoformat() if self.last_run_at else None,
+            "next_run_at": self.next_run_at.isoformat() if self.next_run_at else None,
+            "is_enabled": self.is_enabled,
+            "is_recurring": self.is_recurring,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+        }

@@ -84,14 +84,8 @@ async def get_current_user(
             detail="Invalid authentication credentials",
         )
 
-    # TODO: Fetch user from database
-    # user = await get_user_by_id(user_id)
-    # if user is None:
-    #     raise HTTPException(
-    #         status_code=status.HTTP_401_UNAUTHORIZED,
-    #         detail="User not found",
-    #     )
-
+    # 个人商用简化版：直接返回JWT中的用户信息
+    # 如需完整用户系统，可在此扩展数据库查询
     return {"user_id": user_id, **payload}
 
 

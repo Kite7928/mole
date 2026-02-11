@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { 
   Flame, 
   RefreshCw, 
@@ -15,9 +15,29 @@ import {
   List,
   Tag,
   Link as LinkIcon,
-  ExternalLink
+  ExternalLink,
+  Wand2,
+  X
 } from 'lucide-react'
 import Link from 'next/link'
+import { API_URL } from '@/lib/api'
+
+// 热点新闻类型定义
+interface HotNewsItem {
+  id: number
+  title: string
+  summary: string
+  url: string
+  source: string
+  sourceName: string
+  sourceLogo: string
+  hotScore: number
+  publishedAt: string
+  imageUrl: string
+  category: string
+  tags: string[]
+  created_at: string
+}
 
 export default function HotspotsPage() {
   const [selectedPlatform, setSelectedPlatform] = useState('all')
@@ -28,13 +48,93 @@ export default function HotspotsPage() {
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
   const [showCluster, setShowCluster] = useState(false)
 
+  // 大纲生成相关状态
+  const [showOutlineModal, setShowOutlineModal] = useState(false)
+  const [isGeneratingOutline, setIsGeneratingOutline] = useState(false)
+  const [generatedOutlines, setGeneratedOutlines] = useState<any[]>([])
+  const [selectedNewsForOutline, setSelectedNewsForOutline] = useState<any>(null)
+
+  // 热点详情相关状态
+  const [showDetailModal, setShowDetailModal] = useState(false)
+  const [selectedNewsForDetail, setSelectedNewsForDetail] = useState<any>(null)
+  const [isGeneratingArticle, setIsGeneratingArticle] = useState(false)
+
+  // 预警订阅相关状态
+  const [showSubscriptionModal, setShowSubscriptionModal] = useState(false)
+  const [subscriptions, setSubscriptions] = useState<any[]>([])
+
+  // 竞品对比相关状态
+  const [showCompetitorModal, setShowCompetitorModal] = useState(false)
+  const [competitorAccounts, setCompetitorAccounts] = useState<string[]>([''])
+  const [competitorAnalysis, setCompetitorAnalysis] = useState<any>(null)
+
+  // 页面加载时获取新闻数据
+  useEffect(() => {
+    fetchNews()
+  }, [selectedPlatform])
+
+  const fetchNews = async () => {
+    try {
+      const response = await fetch(`${API_URL}/api/news?limit=50`)
+      const data = await response.json()
+      if (data.items && data.items.length > 0) {
+        // 处理数据，添加缺失的字段
+        const processedNews = data.items
+          .filter((item: any) => {
+            // 根据选择的平台筛选
+            if (selectedPlatform === 'all') return true
+            return item.source === selectedPlatform
+          })
+          .map((item: any) => ({
+            id: item.id,
+            title: item.title,
+            summary: item.summary?.replace(/<[^>]*>/g, '').substring(0, 200) || item.title,
+            url: item.url,
+            source: item.source,
+            sourceName: item.source_name || item.source,
+            sourceLogo: getSourceLogo(item.source),
+            hotScore: Math.round(item.hot_score || 0),
+            publishedAt: formatPublishedAt(item.published_at),
+            imageUrl: '',
+            category: 'tech',
+            tags: ['热点'],
+            created_at: item.created_at
+          }))
+        setHotNews(processedNews)
+      }
+    } catch (error) {
+      console.error('获取新闻失败:', error)
+    }
+  }
+
+  // 获取来源图标
+  const getSourceLogo = (source: string) => {
+    const logos: Record<string, string> = {
+      'ithome': '🏠',
+      '36kr': '🚀',
+      'baidu': '🔍',
+      'zhihu': '📚',
+      'weibo': '📱'
+    }
+    return logos[source] || '📰'
+  }
+
+  // 格式化发布时间
+  const formatPublishedAt = (publishedAt: string) => {
+    if (!publishedAt) return '刚刚'
+    const now = new Date()
+    const published = new Date(publishedAt)
+    const diff = Math.floor((now.getTime() - published.getTime()) / 1000 / 60) // 分钟
+    
+    if (diff < 60) return `${diff}分钟前`
+    if (diff < 1440) return `${Math.floor(diff / 60)}小时前`
+    return `${Math.floor(diff / 1440)}天前`
+  }
+
   const platforms = [
     { id: 'all', name: '全部' },
     { id: 'ithome', name: 'IT之家' },
-    { id: '36kr', name: '36氪' },
-    { id: 'baidu', name: '百度' },
-    { id: 'zhihu', name: '知乎' },
-    { id: 'weibo', name: '微博' },
+    { id: 'baidu', name: '百度资讯' },
   ]
 
   const categories = [
@@ -52,98 +152,29 @@ export default function HotspotsPage() {
     { id: '7d', name: '7天' },
   ]
 
-  const [hotNews, setHotNews] = useState([
-    {
-      id: 1,
-      title: 'GPT-4o发布：AI推理能力的新突破',
-      summary: 'OpenAI今日正式发布GPT-4o，在推理能力上实现重大突破，多项基准测试超越前代模型。',
-      source: 'ithome',
-      sourceName: 'IT之家',
-      sourceLogo: '🏠',
-      url: 'https://ithome.com/xxx',
-      hotScore: 95,
-      publishedAt: '2小时前',
-      imageUrl: 'https://via.placeholder.com/400x300',
-      category: 'ai',
-      tags: ['AI', 'GPT-4', 'OpenAI'],
-    },
-    {
-      id: 2,
-      title: 'DeepSeek-V3：开源模型的新里程碑',
-      summary: 'DeepSeek今日发布V3版本，性能媲美GPT-4，开源社区反响热烈。',
-      source: '36kr',
-      sourceName: '36氪',
-      sourceLogo: '🚀',
-      url: 'https://36kr.com/xxx',
-      hotScore: 88,
-      publishedAt: '3小时前',
-      imageUrl: 'https://via.placeholder.com/400x300',
-      category: 'ai',
-      tags: ['AI', 'DeepSeek', '开源'],
-    },
-    {
-      id: 3,
-      title: 'Claude 3.5 Sonnet：长文本处理的王者',
-      summary: 'Anthropic发布Claude 3.5 Sonnet，支持20万token上下文，长文本处理能力显著提升。',
-      source: 'zhihu',
-      sourceName: '知乎',
-      sourceLogo: '📚',
-      url: 'https://zhihu.com/xxx',
-      hotScore: 82,
-      publishedAt: '5小时前',
-      imageUrl: 'https://via.placeholder.com/400x300',
-      category: 'ai',
-      tags: ['AI', 'Claude', '长文本'],
-    },
-    {
-      id: 4,
-      title: 'Gemini Pro：谷歌AI的最新答卷',
-      summary: 'Google发布Gemini Pro，多模态能力显著提升，在图像和视频理解方面表现优异。',
-      source: 'baidu',
-      sourceName: '百度',
-      sourceLogo: '🔍',
-      url: 'https://baidu.com/xxx',
-      hotScore: 75,
-      publishedAt: '6小时前',
-      imageUrl: 'https://via.placeholder.com/400x300',
-      category: 'ai',
-      tags: ['AI', 'Gemini', 'Google'],
-    },
-    {
-      id: 5,
-      title: '2024年AI大模型发展报告',
-      summary: '知名机构发布2024年AI大模型发展报告，深度分析行业趋势和未来展望。',
-      source: 'weibo',
-      sourceName: '微博',
-      sourceLogo: '📱',
-      url: 'https://weibo.com/xxx',
-      hotScore: 68,
-      publishedAt: '8小时前',
-      imageUrl: 'https://via.placeholder.com/400x300',
-      category: 'ai',
-      tags: ['AI', '报告', '趋势'],
-    },
-    {
-      id: 6,
-      title: 'AI芯片战争升级：英伟达vsAMD',
-      summary: 'AI芯片市场竞争加剧，英伟达和AMD纷纷推出新一代产品，性能对比引发热议。',
-      source: 'ithome',
-      sourceName: 'IT之家',
-      sourceLogo: '🏠',
-      url: 'https://ithome.com/xxx',
-      hotScore: 72,
-      publishedAt: '10小时前',
-      imageUrl: 'https://via.placeholder.com/400x300',
-      category: 'tech',
-      tags: ['芯片', '英伟达', 'AMD'],
-    },
-  ])
+  const [hotNews, setHotNews] = useState<HotNewsItem[]>([])
 
   const handleRefresh = async () => {
     setIsRefreshing(true)
-    // 模拟刷新
-    await new Promise(resolve => setTimeout(resolve, 2000))
-    setIsRefreshing(false)
+    try {
+      // 根据当前选择的平台刷新新闻
+      const source = selectedPlatform === 'all' ? 'ithome' : selectedPlatform
+      
+      const response = await fetch(`${API_URL}/api/news/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source: source, limit: 20 })
+      })
+      const data = await response.json()
+      if (data.success) {
+        // 刷新成功后重新获取新闻列表
+        await fetchNews()
+      }
+    } catch (error) {
+      console.error('刷新失败:', error)
+    } finally {
+      setIsRefreshing(false)
+    }
   }
 
   const handleCluster = () => {
@@ -151,6 +182,36 @@ export default function HotspotsPage() {
     // 热点聚类逻辑
     console.log('Clustering hotspots')
     setTimeout(() => setShowCluster(false), 2000)
+  }
+
+  const handleGenerateOutline = async (news: any) => {
+    setSelectedNewsForOutline(news)
+    setShowOutlineModal(true)
+    setIsGeneratingOutline(true)
+    setGeneratedOutlines([])
+    
+    try {
+      const response = await fetch(`${API_URL}/api/articles/generate-outlines`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          topic: news.title,
+          source_url: news.url
+        })
+      })
+      const data = await response.json()
+      
+      if (data.success && data.outlines) {
+        setGeneratedOutlines(data.outlines)
+      } else {
+        alert(data.error || '生成大纲失败')
+      }
+    } catch (error) {
+      console.error('生成大纲失败:', error)
+      alert('生成大纲失败，请检查AI配置')
+    } finally {
+      setIsGeneratingOutline(false)
+    }
   }
 
   const getHotScoreBorder = (score: number) => {
@@ -165,6 +226,92 @@ export default function HotspotsPage() {
     if (score >= 80) return 'from-orange-500 to-yellow-500'
     if (score >= 70) return 'from-yellow-500 to-green-500'
     return 'from-gray-400 to-gray-500'
+  }
+
+  // 处理生成完整文章
+  const handleGenerateFullArticle = async (outline: any) => {
+    if (!selectedNewsForOutline) return
+    
+    setIsGeneratingArticle(true)
+    try {
+      const response = await fetch(`${API_URL}/api/articles`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: outline.title,
+          content: outline.points.map((p: string) => `## ${p}\n`).join('\n'),
+          summary: outline.angle,
+          source_topic: selectedNewsForOutline.title,
+          source_url: selectedNewsForOutline.url,
+          status: 'draft',
+          tags: selectedNewsForOutline.tags,
+          generate_cover_image: true
+        })
+      })
+      const data = await response.json()
+      
+      if (data.id) {
+        alert('文章创建成功！正在跳转到编辑页面...')
+        window.location.href = `/articles/create?id=${data.id}`
+      } else {
+        alert('文章创建失败')
+      }
+    } catch (error) {
+      console.error('生成文章失败:', error)
+      alert('生成文章失败，请稍后重试')
+    } finally {
+      setIsGeneratingArticle(false)
+    }
+  }
+
+  // 处理显示热点详情
+  const handleShowDetail = (news: any) => {
+    setSelectedNewsForDetail(news)
+    setShowDetailModal(true)
+  }
+
+  // 处理添加订阅
+  const handleAddSubscription = (keyword: string, threshold: number) => {
+    const newSubscription = {
+      id: Date.now(),
+      keyword,
+      threshold,
+      createdAt: new Date().toISOString()
+    }
+    setSubscriptions([...subscriptions, newSubscription])
+    alert(`已添加订阅：${keyword}（热度阈值：${threshold}）`)
+    setShowSubscriptionModal(false)
+  }
+
+  // 处理竞品分析
+  const handleCompetitorAnalysis = async () => {
+    if (!selectedNewsForDetail) return
+    
+    const validAccounts = competitorAccounts.filter(acc => acc.trim())
+    if (validAccounts.length === 0) {
+      alert('请输入至少一个竞品账号')
+      return
+    }
+
+    try {
+      // 模拟竞品分析
+      const mockAnalysis = {
+        overlapScore: 65,
+        competitorTopics: [
+          { title: 'AI大模型应用', hotScore: 85 },
+          { title: '新能源汽车', hotScore: 78 },
+          { title: '智能硬件', hotScore: 72 }
+        ],
+        ourTopics: [
+          { title: selectedNewsForDetail.title, hotScore: selectedNewsForDetail.hotScore },
+          { title: 'AI写作助手', hotScore: 75 },
+          { title: '内容创作', hotScore: 68 }
+        ]
+      }
+      setCompetitorAnalysis(mockAnalysis)
+    } catch (error) {
+      console.error('竞品分析失败:', error)
+    }
   }
 
   return (
@@ -324,13 +471,13 @@ export default function HotspotsPage() {
             key={news.id}
             className={`bg-white/90 backdrop-blur-sm rounded-2xl p-5 border-2 ${getHotScoreBorder(news.hotScore)} shadow-lg hover:shadow-xl transition-all duration-300 hover:-translate-y-1`}
           >
-            {/* Image */}
-            <div className="w-full h-48 rounded-xl overflow-hidden bg-gradient-to-br from-gray-100 to-gray-200 mb-4">
-              <img
-                src={news.imageUrl}
-                alt={news.title}
-                className="w-full h-full object-cover hover:scale-105 transition-transform duration-300"
-              />
+            {/* Image - 使用CSS渐变背景 */}
+            <div className="w-full h-48 rounded-xl overflow-hidden bg-gradient-to-br from-[#5a6e5c] to-[#4a5e4c] mb-4 flex items-center justify-center relative group">
+              <div className="absolute inset-0 bg-gradient-to-br from-purple-500/20 to-blue-500/20 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+              <div className="relative z-10 text-center p-4">
+                <div className="text-4xl mb-2">{news.sourceLogo}</div>
+                <p className="text-white/90 text-sm font-medium line-clamp-2">{news.title}</p>
+              </div>
             </div>
 
             {/* Hot Score Badge */}
@@ -375,6 +522,13 @@ export default function HotspotsPage() {
                 {news.publishedAt}
               </div>
               <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleShowDetail(news)}
+                  className="p-2 rounded-lg hover:bg-gray-100 text-gray-600 hover:text-[#5a6e5c] transition-colors"
+                  title="查看详情"
+                >
+                  <TrendingUp size={18} />
+                </button>
                 <a
                   href={news.url}
                   target="_blank"
@@ -393,14 +547,23 @@ export default function HotspotsPage() {
               </div>
             </div>
 
-            {/* Quick Action - 关联创作 */}
-            <Link
-              href="/articles/create"
-              className="mt-4 w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-[#5a6e5c] to-[#4a5e4c] text-white rounded-xl font-medium hover:shadow-lg hover:shadow-[#5a6e5c]/30 transition-all duration-300"
-            >
-              <Sparkles size={18} />
-              关联创作
-            </Link>
+            {/* Quick Actions */}
+            <div className="mt-4 space-y-2">
+              <button
+                onClick={() => handleGenerateOutline(news)}
+                className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-purple-500 to-purple-600 text-white rounded-xl font-medium hover:shadow-lg hover:shadow-purple-500/30 transition-all duration-300"
+              >
+                <Wand2 size={18} />
+                AI生成大纲
+              </button>
+              <Link
+                href="/articles/create"
+                className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-[#5a6e5c] to-[#4a5e4c] text-white rounded-xl font-medium hover:shadow-lg hover:shadow-[#5a6e5c]/30 transition-all duration-300"
+              >
+                <Sparkles size={18} />
+                关联创作
+              </Link>
+            </div>
           </div>
         ))}
       </div>
@@ -412,6 +575,83 @@ export default function HotspotsPage() {
           <TrendingUp size={20} className="text-[#5a6e5c]" />
         </button>
       </div>
+
+      {/* 大纲生成弹窗 */}
+      {showOutlineModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[80vh] overflow-hidden">
+            {/* Header */}
+            <div className="flex items-center justify-between p-6 border-b">
+              <div>
+                <h3 className="text-xl font-bold">AI生成3种差异化大纲</h3>
+                <p className="text-sm text-gray-600 mt-1">主题：{selectedNewsForOutline?.title}</p>
+              </div>
+              <button
+                onClick={() => setShowOutlineModal(false)}
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="p-6 overflow-y-auto max-h-[60vh]">
+              {isGeneratingOutline ? (
+                <div className="flex flex-col items-center justify-center py-12">
+                  <Loader2 size={32} className="animate-spin text-[#5a6e5c]" />
+                  <p className="mt-4 text-gray-600">正在生成大纲...</p>
+                </div>
+              ) : generatedOutlines.length > 0 ? (
+                <div className="space-y-4">
+                  {generatedOutlines.map((outline, index) => (
+                    <div key={index} className="border-2 rounded-xl p-5 hover:border-[#5a6e5c] transition-colors">
+                      <div className="flex items-start justify-between mb-3">
+                        <div>
+                          <h4 className="font-bold text-lg text-[#5a6e5c]">{outline.angle}</h4>
+                          <p className="text-sm text-gray-600 mt-1">建议标题：{outline.title}</p>
+                        </div>
+                        <div className="bg-[#5a6e5c]/10 text-[#5a6e5c] px-3 py-1 rounded-full text-sm">
+                          大纲 {index + 1}
+                        </div>
+                      </div>
+                      <ul className="space-y-2 ml-4">
+                        {outline.points.map((point: string, pIndex: number) => (
+                          <li key={pIndex} className="flex items-start gap-2">
+                            <div className="w-2 h-2 rounded-full bg-[#5a6e5c] mt-2 flex-shrink-0" />
+                            <span className="text-gray-700">{point}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-12 text-gray-500">
+                  <p>暂无大纲数据</p>
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="flex justify-end gap-3 p-6 border-t bg-gray-50">
+              <button
+                onClick={() => setShowOutlineModal(false)}
+                className="px-6 py-2 rounded-lg border border-gray-300 hover:bg-gray-100 transition-colors"
+              >
+                关闭
+              </button>
+              {generatedOutlines.length > 0 && (
+                <Link
+                  href="/articles/create"
+                  className="px-6 py-2 rounded-lg bg-gradient-to-r from-[#5a6e5c] to-[#4a5e4c] text-white hover:shadow-lg transition-all"
+                >
+                  使用此大纲创建文章
+                </Link>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

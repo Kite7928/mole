@@ -2,30 +2,23 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { 
-  LayoutDashboard, 
-  FileText, 
-  Flame, 
-  BarChart3, 
-  Send, 
+import {
+  FileText,
+  Flame,
+  Send,
   Settings,
   PenTool,
   Menu,
   X,
-  Sparkles,
-  Zap,
-  Bot
+  Sparkles
 } from 'lucide-react'
 import { useState } from 'react'
 
 const navigation = [
-  { name: '仪表板', href: '/', icon: LayoutDashboard },
   { name: 'AI写作', href: '/articles/create', icon: PenTool },
   { name: '文章管理', href: '/articles', icon: FileText },
   { name: '热点监控', href: '/hotspots', icon: Flame },
-  { name: '数据统计', href: '/statistics', icon: BarChart3 },
   { name: '微信发布', href: '/editor', icon: Send },
-  { name: 'AI提供商', href: '/ai-providers', icon: Bot },
   { name: '系统设置', href: '/settings', icon: Settings },
 ]
 
@@ -76,7 +69,7 @@ export default function Sidebar() {
           </div>
 
           {/* Navigation */}
-          <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
+          <nav className="flex-1 p-4 space-y-2 overflow-y-auto" data-tour="sidebar">
             {navigation.map((item) => {
               const isActive = pathname === item.href
               const Icon = item.icon
@@ -85,6 +78,7 @@ export default function Sidebar() {
                 <Link
                   key={item.name}
                   href={item.href}
+                  data-tour={item.name === 'AI写作' ? 'ai-writing' : item.name === '热点监控' ? 'hotspots' : item.name === '系统设置' ? 'settings' : undefined}
                   className={`
                     flex items-center gap-3 px-4 py-3 rounded-xl
                     transition-all duration-300

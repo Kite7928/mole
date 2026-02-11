@@ -6,6 +6,7 @@ from pygments import highlight
 from pygments.lexers import get_lexer_by_name
 from pygments.formatters import HtmlFormatter
 from ..core.logger import logger
+import os
 
 
 class MarkdownConverterService:
@@ -115,12 +116,40 @@ class MarkdownConverterService:
             em { font-style: italic; }
         </style>
         """
+        
+        # 微信样式表路径
+        self.wechat_style_path = os.path.join(
+            os.path.dirname(__file__),
+            '..',
+            'templates',
+            'wechat_style.css'
+        )
+        
+        # 加载微信样式表
+        self.wechat_style = self._load_wechat_style()
+        logger.info(f"微信样式表加载完成，路径: {self.wechat_style_path}")
+
+    def _load_wechat_style(self) -> str:
+        """加载微信样式表"""
+        try:
+            if os.path.exists(self.wechat_style_path):
+                with open(self.wechat_style_path, 'r', encoding='utf-8') as f:
+                    style_content = f.read()
+                # 包装在 style 标签中
+                return f'<style>\n{style_content}\n</style>'
+            else:
+                logger.warning(f"微信样式表文件不存在: {self.wechat_style_path}，使用默认样式")
+                return self.default_style
+        except Exception as e:
+            logger.error(f"加载微信样式表失败: {str(e)}，使用默认样式")
+            return self.default_style
 
     async def convert_to_html(
         self,
         markdown_text: str,
         style: Optional[str] = None,
-        inline_css: bool = True
+        inline_css: bool = True,
+        use_wechat_style: bool = False
     ) -> str:
         """
         Convert Markdown to HTML for WeChat.
@@ -129,11 +158,16 @@ class MarkdownConverterService:
             markdown_text: Markdown text to convert
             style: Custom CSS style (optional)
             inline_css: Whether to inline CSS styles
+            use_wechat_style: Whether to use WeChat official style
 
         Returns:
             HTML string
         """
         try:
+            # 如果使用微信样式，替换默认样式
+            if use_wechat_style:
+                style = self.wechat_style
+            
             # Convert Markdown to HTML
             html = markdown.markdown(
                 markdown_text,
@@ -171,7 +205,12 @@ class MarkdownConverterService:
                 soup.insert(0, style_tag)
 
             result = str(soup)
-            logger.info("Markdown converted to HTML successfully")
+            
+            if use_wechat_style:
+                logger.info("Markdown converted to HTML with WeChat style successfully")
+            else:
+                logger.info("Markdown converted to HTML successfully")
+                
             return result
 
         except Exception as e:
@@ -409,6 +448,39 @@ class MarkdownConverterService:
 
         return html
 
+    async def convert_to_wechat_html(
+        self,
+        markdown_text: str,
+        inline_css: bool = True
+    ) -> str:
+        """
+        Convert Markdown to WeChat-compatible HTML with official style.
+
+        Args:
+            markdown_text: Markdown text to convert
+            inline_css: Whether to inline CSS styles
+
+        Returns:
+            HTML string with WeChat style
+        """
+        try:
+            # Convert with WeChat style
+            html = await self.convert_to_html(
+                markdown_text,
+                inline_css=inline_css,
+                use_wechat_style=True
+            )
+            
+            logger.info("Markdown converted to WeChat HTML successfully")
+            return html
+            
+        except Exception as e:
+            logger.error(f"Error converting to WeChat HTML: {str(e)}")
+            raise
+
 
 # Global instance
 markdown_converter_service = MarkdownConverterService()
+
+# 别名，用于向后兼容
+markdown_converter = markdown_converter_service

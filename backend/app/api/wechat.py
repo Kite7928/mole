@@ -1,331 +1,501 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+"""
+微信集成API路由 - 简化版
+支持配置管理、连接测试、发布草稿、图片上传
+"""
+
+from fastapi import APIRouter, HTTPException, UploadFile, File, Depends
+from pydantic import BaseModel, Field
+from typing import Optional
+from pathlib import Path
+import shutil
+from ..services.wechat_service import wechat_service
+from ..services.image_generation_service import image_generation_service
+from ..core.config import settings
+from ..core.logger import logger
+from ..core.database import get_db
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from typing import List, Optional
-from pydantic import BaseModel, Field
-from datetime import datetime
-from ..core.database import get_db
-from ..core.logger import logger
-from ..models.wechat import WeChatAccount, WeChatMedia
-from ..models.article import Article
-from ..services.wechat_service import wechat_service
+from ..models.config import AppConfig
 
 router = APIRouter()
 
 
-# Pydantic models
-class WeChatAccountCreate(BaseModel):
-    name: str = Field(..., description="Account name")
-    app_id: str = Field(..., description="WeChat AppID")
-    app_secret: str = Field(..., description="WeChat AppSecret")
-    account_type: Optional[str] = Field(None, description="Account type")
-    is_default: bool = Field(False, description="Set as default account")
+class WeChatConfig(BaseModel):
+    """微信配置模型"""
+    app_id: str = Field(..., description="公众号AppID")
+    app_secret: str = Field(..., description="公众号AppSecret")
 
 
-class WeChatAccountResponse(BaseModel):
-    id: int
-    name: str
-    app_id: str
-    account_type: Optional[str]
-    is_active: bool
-    is_default: bool
-    followers_count: int
-    created_at: datetime
-
-    class Config:
-        from_attributes = True
+class PublishRequest(BaseModel):
+    """发布请求模型"""
+    title: str = Field(..., description="文章标题")
+    content: str = Field(..., description="文章内容（HTML格式）")
+    digest: str = Field(default="", description="摘要")
+    cover_media_id: str = Field(default="", description="封面图media_id")
+    author: str = Field(default="AI助手", description="作者")
 
 
-class DraftCreateRequest(BaseModel):
-    article_id: int = Field(..., description="Article ID")
-    account_id: int = Field(..., description="WeChat account ID")
-
-
-class DraftPublishRequest(BaseModel):
-    draft_id: str = Field(..., description="WeChat draft media_id")
-
-
-class ArticlePublishRequest(BaseModel):
-    article_id: int = Field(..., description="Article ID")
-    account_id: int = Field(..., description="WeChat account ID")
-
-
-# Endpoints
-@router.post("/accounts", response_model=WeChatAccountResponse)
-async def create_wechat_account(
-    account: WeChatAccountCreate,
-    db: AsyncSession = Depends(get_db)
-):
-    """Create a new WeChat account."""
+@router.get("/config", response_model=dict)
+async def get_wechat_config():
+    """
+    获取微信配置（隐藏密钥）
+    
+    Returns:
+        微信配置信息（密钥已隐藏）
+    """
     try:
-        logger.info(f"Creating WeChat account: {account.name}")
+        return {
+            "app_id": settings.WECHAT_APP_ID,
+            "app_secret": "***隐藏***" if settings.WECHAT_APP_SECRET else None,
+            "configured": bool(settings.WECHAT_APP_ID and settings.WECHAT_APP_SECRET)
+        }
+    except Exception as e:
+        logger.error(f"获取微信配置失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取配置失败: {str(e)}")
 
-        # Check if AppID already exists
-        result = await db.execute(
-            select(WeChatAccount).where(WeChatAccount.app_id == account.app_id)
+
+@router.post("/test", response_model=dict)
+async def test_wechat_connection():
+    """
+    测试微信连接
+    
+    Returns:
+        测试结果
+    """
+    try:
+        if not settings.WECHAT_APP_ID or not settings.WECHAT_APP_SECRET:
+            raise HTTPException(status_code=400, detail="未配置微信AppID和AppSecret")
+        
+        logger.info("测试微信连接")
+        
+        # 尝试获取access_token
+        access_token = await wechat_service.get_access_token(
+            app_id=settings.WECHAT_APP_ID,
+            app_secret=settings.WECHAT_APP_SECRET
         )
-        existing = result.scalar_one_or_none()
+        
+        return {
+            "success": True,
+            "message": "微信连接测试成功",
+            "access_token": access_token[:20] + "..."  # 只显示部分token
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"测试微信连接失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"连接测试失败: {str(e)}")
 
-        if existing:
-            raise HTTPException(status_code=400, detail="AppID already exists")
 
-        # If setting as default, unset other defaults
-        if account.is_default:
-            await db.execute(
-                select(WeChatAccount).where(WeChatAccount.is_default == True)
+@router.post("/publish", response_model=dict)
+async def publish_to_wechat(request: PublishRequest, db: AsyncSession = Depends(get_db)):
+    """
+    发布文章到微信草稿箱
+
+    Args:
+        request: 发布请求
+        db: 数据库会话
+
+    Returns:
+        发布结果
+    """
+    try:
+        # 从数据库读取微信配置
+        result = await db.execute(select(AppConfig))
+        config = result.scalar_one_or_none()
+        
+        if not config or not config.wechat_app_id or not config.wechat_app_secret:
+            logger.warning("微信配置未设置")
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "未配置微信公众号",
+                    "message": "请先在系统设置中配置微信公众号的AppID和AppSecret",
+                    "guide": "1. 访问 http://localhost:3000/settings\n2. 配置微信公众号的AppID和AppSecret\n3. 保存配置"
+                }
             )
-            # TODO: Update all existing accounts to is_default=False
+        
+        wechat_app_id = config.wechat_app_id
+        wechat_app_secret = config.wechat_app_secret
 
-        # Create account
-        wechat_account = WeChatAccount(
-            name=account.name,
-            app_id=account.app_id,
-            app_secret=account.app_secret,
-            account_type=account.account_type,
-            is_default=account.is_default
-        )
+        logger.info(f"发布文章到微信，标题: {request.title}")
 
-        db.add(wechat_account)
-        await db.commit()
-        await db.refresh(wechat_account)
-
-        logger.info(f"WeChat account created: {wechat_account.id}")
-        return wechat_account
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error creating WeChat account: {str(e)}")
-        await db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/accounts", response_model=List[WeChatAccountResponse])
-async def list_wechat_accounts(db: AsyncSession = Depends(get_db)):
-    """List all WeChat accounts."""
-    try:
-        result = await db.execute(
-            select(WeChatAccount).order_by(WeChatAccount.created_at.desc())
-        )
-        accounts = result.scalars().all()
-
-        return accounts
-
-    except Exception as e:
-        logger.error(f"Error listing WeChat accounts: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/accounts/{account_id}", response_model=WeChatAccountResponse)
-async def get_wechat_account(
-    account_id: int,
-    db: AsyncSession = Depends(get_db)
-):
-    """Get WeChat account by ID."""
-    try:
-        result = await db.execute(
-            select(WeChatAccount).where(WeChatAccount.id == account_id)
-        )
-        account = result.scalar_one_or_none()
-
-        if not account:
-            raise HTTPException(status_code=404, detail="Account not found")
-
-        return account
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting WeChat account: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/media/upload")
-async def upload_media(
-    file: UploadFile = File(...),
-    media_type: str = Form("image"),
-    account_id: int = Form(None)
-):
-    """Upload media file to WeChat."""
-    try:
-        logger.info(f"Uploading media: {file.filename}")
-
-        # Save uploaded file temporarily
-        import tempfile
-        import os
-
-        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.filename)[1]) as temp_file:
-            content = await file.read()
-            temp_file.write(content)
-            temp_file_path = temp_file.name
-
+        # 获取access_token
         try:
-            # Upload to WeChat
-            result = await wechat_service.upload_media(temp_file_path, media_type)
+            access_token = await wechat_service.get_access_token(
+                app_id=wechat_app_id,
+                app_secret=wechat_app_secret
+            )
+        except ValueError as ve:
+            # 网络连接错误
+            error_msg = str(ve)
+            if "无法连接" in error_msg or "连接失败" in error_msg:
+                raise HTTPException(
+                    status_code=503,
+                    detail={
+                        "error": "无法连接到微信API",
+                        "message": "网络连接失败，请检查网络设置",
+                        "guide": "可能的原因：\n1. 网络连接问题\n2. 需要配置代理\n3. 防火墙阻止了连接\n\n建议：\n- 检查网络连接\n- 如在国内，可能需要配置代理\n- 检查防火墙设置"
+                    }
+                )
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "error": "获取微信access_token失败",
+                        "message": error_msg,
+                        "guide": "请检查AppID和AppSecret是否正确"
+                    }
+                )
 
-            return {
-                "message": "Media uploaded successfully",
-                "media_id": result.get("media_id"),
-                "url": result.get("url")
-            }
+        # 创建草稿
+        try:
+            # 如果没有封面图，生成一个默认封面图
+            cover_media_id = request.cover_media_id
+            if not cover_media_id:
+                logger.info("未提供封面图，生成默认封面图...")
+                
+                # 创建一个简单的默认封面图
+                from PIL import Image, ImageDraw, ImageFont
+                import io
+                import uuid
+                
+                # 创建封面图
+                img = Image.new('RGB', (900, 500), color='#4A90E2')
+                draw = ImageDraw.Draw(img)
+                
+                # 尝试添加标题文字
+                try:
+                    # 使用默认字体
+                    font = ImageFont.load_default()
+                    title_text = request.title[:20] if request.title else "文章封面"
+                    # 简单的文字居中
+                    text_width = draw.textlength(title_text, font=font)
+                    x = (900 - text_width) / 2
+                    y = 250
+                    draw.text((x, y), title_text, fill='white', font=font)
+                except:
+                    pass  # 如果字体加载失败，就使用纯色背景
+                
+                # 保存临时图片
+                temp_image_path = f"G:/db/guwen/gzh/backend/uploads/temp_cover_{uuid.uuid4().hex[:8]}.jpg"
+                img.save(temp_image_path, 'JPEG')
+                
+                # 上传到微信
+                cover_media_id = await wechat_service.upload_permanent_material(
+                    access_token=access_token,
+                    media_type="image",
+                    file_path=temp_image_path,
+                    description={"introduction": request.digest or request.title}
+                )
+                
+                logger.info(f"默认封面图上传成功: {cover_media_id}")
+            
+            draft_id = await wechat_service.create_draft(
+                access_token=access_token,
+                title=request.title,
+                author=request.author,
+                digest=request.digest,
+                content=request.content,
+                cover_media_id=cover_media_id
+            )
+        except ValueError as ve:
+            error_msg = str(ve)
+            if "无法连接" in error_msg or "连接失败" in error_msg:
+                raise HTTPException(
+                    status_code=503,
+                    detail={
+                        "error": "无法连接到微信API",
+                        "message": "创建草稿时网络连接失败",
+                        "guide": "请检查网络连接和代理设置"
+                    }
+                )
+            else:
+                raise HTTPException(
+                    status_code=500,
+                    detail={
+                        "error": "创建草稿失败",
+                        "message": error_msg,
+                        "guide": "请检查文章内容是否符合微信公众号规范"
+                    }
+                )
 
-        finally:
-            # Clean up temp file
-            if os.path.exists(temp_file_path):
-                os.remove(temp_file_path)
+        logger.info(f"草稿创建成功: {draft_id}")
 
+        return {
+            "success": True,
+            "message": "草稿创建成功",
+            "draft_id": draft_id
+        }
+
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error uploading media: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"发布到微信失败: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "发布失败",
+                "message": str(e),
+                "guide": "请稍后重试，如问题持续请联系技术支持"
+            }
+        )
 
 
-@router.post("/drafts/create")
-async def create_draft(
-    request: DraftCreateRequest,
+@router.post("/upload-image", response_model=dict)
+async def upload_wechat_image(file: UploadFile = File(...)):
+    """
+    上传图片到微信并返回media_id
+    
+    Args:
+        file: 图片文件
+    
+    Returns:
+        上传结果，包含media_id和图片URL
+    """
+    try:
+        if not settings.WECHAT_APP_ID or not settings.WECHAT_APP_SECRET:
+            raise HTTPException(status_code=400, detail="未配置微信AppID和AppSecret")
+        
+        logger.info(f"上传图片到微信，文件名: {file.filename}")
+        
+        # 验证文件类型
+        if not file.content_type.startswith('image/'):
+            raise HTTPException(status_code=400, detail="只支持图片文件")
+        
+        # 保存到临时目录
+        upload_dir = Path(settings.UPLOAD_DIR)
+        upload_dir.mkdir(exist_ok=True)
+        
+        file_path = upload_dir / file.filename
+        with open(file_path, 'wb') as f:
+            shutil.copyfileobj(file.file, f)
+        
+        # 裁剪图片到微信封面尺寸
+        cropped_path = await image_generation_service.crop_image(str(file_path))
+        
+        # 上传到微信
+        access_token = await wechat_service.get_access_token(
+            app_id=settings.WECHAT_APP_ID,
+            app_secret=settings.WECHAT_APP_SECRET
+        )
+        
+        media_id = await wechat_service.upload_media(
+            access_token=access_token,
+            media_type="image",
+            file_path=cropped_path
+        )
+        
+        logger.info(f"图片上传成功，media_id: {media_id}")
+        
+        return {
+            "success": True,
+            "message": "图片上传成功",
+            "media_id": media_id,
+            "image_path": cropped_path
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"上传图片失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"上传失败: {str(e)}")
+
+@router.post("/publish-draft/{article_id}", response_model=dict)
+async def publish_article_to_wechat_draft(
+    article_id: int,
     db: AsyncSession = Depends(get_db)
 ):
-    """Create WeChat draft from article."""
-    try:
-        logger.info(f"Creating draft for article {request.article_id}")
+    """
+    根据文章ID发布到微信草稿箱
 
-        # Get article
-        result = await db.execute(
-            select(Article).where(Article.id == request.article_id)
-        )
+    Args:
+        article_id: 文章ID
+        db: 数据库会话
+
+    Returns:
+        发布结果
+    """
+    try:
+        logger.info(f"发布文章到微信草稿箱，文章ID: {article_id}")
+
+        # 1. 从数据库查询文章
+        from ..models.article import Article
+        query = select(Article).where(Article.id == article_id)
+        result = await db.execute(query)
         article = result.scalar_one_or_none()
 
         if not article:
-            raise HTTPException(status_code=404, detail="Article not found")
+            raise HTTPException(status_code=404, detail="文章不存在")
 
-        # Get WeChat account
-        result = await db.execute(
-            select(WeChatAccount).where(WeChatAccount.id == request.account_id)
-        )
-        account = result.scalar_one_or_none()
+        # 2. 从数据库读取微信配置
+        query_config = select(AppConfig).order_by(AppConfig.id.desc())
+        result_config = await db.execute(query_config)
+        config = result_config.scalar_one_or_none()
 
-        if not account:
-            raise HTTPException(status_code=404, detail="WeChat account not found")
+        if not config or not config.wechat_app_id or not config.wechat_app_secret:
+            logger.warning("微信配置未设置")
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "未配置微信公众号",
+                    "message": "请先在系统设置中配置微信公众号的AppID和AppSecret",
+                    "guide": "1. 访问 http://localhost:3000/settings\n2. 配置微信公众号的AppID和AppSecret\n3. 保存配置"
+                }
+            )
 
-        # Initialize WeChat service with account credentials
-        wechat = wechat_service.__class__(account.app_id, account.app_secret)
+        wechat_app_id = config.wechat_app_id
+        wechat_app_secret = config.wechat_app_secret
 
-        # Prepare article data
-        article_data = {
-            "title": article.title,
-            "content": article.content,
-            "digest": article.summary,
-            "author": "AI Writer",
-            "thumb_media_id": article.cover_image_media_id
-        }
+        # 3. 获取access_token
+        try:
+            access_token = await wechat_service.get_access_token(
+                app_id=wechat_app_id,
+                app_secret=wechat_app_secret
+            )
+        except ValueError as ve:
+            error_msg = str(ve)
+            if "无法连接" in error_msg or "连接失败" in error_msg:
+                raise HTTPException(
+                    status_code=503,
+                    detail={
+                        "error": "无法连接到微信API",
+                        "message": "网络连接失败，请检查网络设置",
+                        "guide": "可能的原因：\n1. 网络连接问题\n2. 需要配置代理\n3. 防火墙阻止了连接"
+                    }
+                )
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "error": "获取微信access_token失败",
+                        "message": error_msg,
+                        "guide": "请检查AppID和AppSecret是否正确"
+                    }
+                )
 
-        # Create draft
-        result = await wechat.create_draft([article_data])
+        # 4. 处理封面图
+        cover_media_id = ""
+        if article.cover_image_url:
+            # 如果文章有封面图，上传到微信
+            try:
+                # 检查封面图路径
+                cover_path = article.cover_image_url
+                if cover_path.startswith('http://') or cover_path.startswith('https://'):
+                    # 如果是URL，需要先下载
+                    logger.info(f"封面图是URL，暂不支持自动下载: {cover_path}")
+                else:
+                    # 本地文件路径
+                    if not Path(cover_path).is_absolute():
+                        # 相对路径，转换为绝对路径
+                        cover_path = str(Path(settings.UPLOAD_DIR) / cover_path)
 
-        # Update article with draft ID
-        article.wechat_draft_id = result.get("media_id")
-        await db.commit()
+                    if Path(cover_path).exists():
+                        cover_media_id = await wechat_service.upload_permanent_material(
+                            access_token=access_token,
+                            media_type="image",
+                            file_path=cover_path,
+                            description={"introduction": article.summary or article.title}
+                        )
+                        logger.info(f"封面图上传成功: {cover_media_id}")
+            except Exception as img_error:
+                logger.warning(f"上传封面图失败: {str(img_error)}，将生成默认封面")
 
-        return {
-            "message": "Draft created successfully",
-            "draft_id": result.get("media_id")
-        }
+        # 如果没有封面图或上传失败，生成默认封面
+        if not cover_media_id:
+            logger.info("生成默认封面图...")
+            try:
+                from PIL import Image, ImageDraw, ImageFont
+                import uuid
 
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error creating draft: {str(e)}")
-        await db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+                # 创建封面图
+                img = Image.new('RGB', (900, 500), color='#4A90E2')
+                draw = ImageDraw.Draw(img)
 
+                # 添加标题文字
+                try:
+                    font = ImageFont.load_default()
+                    title_text = article.title[:20] if article.title else "文章封面"
+                    text_bbox = draw.textbbox((0, 0), title_text, font=font)
+                    text_width = text_bbox[2] - text_bbox[0]
+                    x = (900 - text_width) / 2
+                    y = 250
+                    draw.text((x, y), title_text, fill='white', font=font)
+                except:
+                    pass
 
-@router.post("/drafts/publish")
-async def publish_draft(request: DraftPublishRequest):
-    """Publish WeChat draft."""
-    try:
-        logger.info(f"Publishing draft: {request.draft_id}")
+                # 保存临时图片
+                temp_image_path = str(Path(settings.UPLOAD_DIR) / f"temp_cover_{uuid.uuid4().hex[:8]}.jpg")
+                img.save(temp_image_path, 'JPEG')
 
-        result = await wechat_service.publish_article(request.draft_id)
+                # 上传到微信
+                cover_media_id = await wechat_service.upload_permanent_material(
+                    access_token=access_token,
+                    media_type="image",
+                    file_path=temp_image_path,
+                    description={"introduction": article.summary or article.title}
+                )
+                logger.info(f"默认封面图上传成功: {cover_media_id}")
+            except Exception as default_img_error:
+                logger.error(f"生成默认封面图失败: {str(default_img_error)}")
+                # 继续执行，不阻塞发布流程
 
-        return {
-            "message": "Article published successfully",
-            "publish_id": result.get("publish_id")
-        }
+        # 5. 创建草稿
+        try:
+            draft_id = await wechat_service.create_draft(
+                access_token=access_token,
+                title=article.title,
+                author="AI助手",
+                digest=article.summary or "",
+                content=article.content,
+                cover_media_id=cover_media_id
+            )
+        except ValueError as ve:
+            error_msg = str(ve)
+            if "无法连接" in error_msg or "连接失败" in error_msg:
+                raise HTTPException(
+                    status_code=503,
+                    detail={
+                        "error": "无法连接到微信API",
+                        "message": "创建草稿时网络连接失败",
+                        "guide": "请检查网络连接和代理设置"
+                    }
+                )
+            else:
+                raise HTTPException(
+                    status_code=500,
+                    detail={
+                        "error": "创建草稿失败",
+                        "message": error_msg,
+                        "guide": "请检查文章内容是否符合微信公众号规范"
+                    }
+                )
 
-    except Exception as e:
-        logger.error(f"Error publishing draft: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/articles/publish")
-async def publish_article(request: ArticlePublishRequest, db: AsyncSession = Depends(get_db)):
-    """Publish article directly (create draft and publish)."""
-    try:
-        logger.info(f"Publishing article {request.article_id}")
-
-        # Get article
-        result = await db.execute(
-            select(Article).where(Article.id == request.article_id)
-        )
-        article = result.scalar_one_or_none()
-
-        if not article:
-            raise HTTPException(status_code=404, detail="Article not found")
-
-        # Get WeChat account
-        result = await db.execute(
-            select(WeChatAccount).where(WeChatAccount.id == request.account_id)
-        )
-        account = result.scalar_one_or_none()
-
-        if not account:
-            raise HTTPException(status_code=404, detail="WeChat account not found")
-
-        # Initialize WeChat service
-        wechat = wechat_service.__class__(account.app_id, account.app_secret)
-
-        # Create article data
-        article_data = {
-            "title": article.title,
-            "content": article.content,
-            "digest": article.summary,
-            "author": "AI Writer",
-            "thumb_media_id": article.cover_image_media_id
-        }
-
-        # Create draft
-        draft_result = await wechat.create_draft([article_data])
-        draft_id = draft_result.get("media_id")
-
-        # Publish draft
-        publish_result = await wechat.publish_article(draft_id)
-
-        # Update article
+        # 6. 更新文章状态
+        from ..models.article import ArticleStatus
         article.wechat_draft_id = draft_id
-        article.wechat_publish_time = datetime.utcnow()
-        article.status = "published"
+        article.status = ArticleStatus.PUBLISHED
         await db.commit()
 
+        logger.info(f"文章发布成功，草稿ID: {draft_id}")
+
         return {
-            "message": "Article published successfully",
+            "success": True,
+            "message": "发布到微信草稿箱成功",
             "draft_id": draft_id,
-            "publish_id": publish_result.get("publish_id")
+            "article_id": article_id
         }
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error publishing article: {str(e)}")
+        logger.error(f"发布到微信失败: {str(e)}")
         await db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/account/info")
-async def get_account_info():
-    """Get WeChat account information."""
-    try:
-        result = await wechat_service.get_user_info()
-        return result
-
-    except Exception as e:
-        logger.error(f"Error getting account info: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "发布失败",
+                "message": str(e),
+                "guide": "请稍后重试，如问题持续请联系技术支持"
+            }
+        )

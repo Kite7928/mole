@@ -1,11 +1,12 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
+import { ConfigWizard } from '@/components/onboarding/config-wizard'
 import {
   Save,
   Key,
@@ -17,7 +18,10 @@ import {
   AlertCircle,
   Eye,
   EyeOff,
+  Zap,
 } from 'lucide-react'
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 export default function SettingsPage() {
   const [loading, setLoading] = useState(false)
@@ -111,7 +115,42 @@ export default function SettingsPage() {
     enableMarkdownEditor: true,
   })
 
+  // 保存从后端加载的原始配置
+  const [serverConfig, setServerConfig] = useState<any>(null)
+
   const [saved, setSaved] = useState(false)
+
+  // 从后端加载配置
+  useEffect(() => {
+    const loadConfig = async () => {
+      try {
+        const response = await fetch(`${API_URL}/api/config`)
+        if (response.ok) {
+          const data = await response.json()
+          if (data.success && data.config) {
+            const configData = data.config
+            // 保存原始配置到 serverConfig
+            setServerConfig(configData)
+
+            // 根据后端配置更新前端状态
+            setConfig((prev) => ({
+              ...prev,
+              // DeepSeek 配置
+              deepseekApiKey: configData.api_key || prev.deepseekApiKey,
+              deepseekBaseUrl: configData.base_url || prev.deepseekBaseUrl,
+              deepseekModel: configData.model || prev.deepseekModel,
+              // 微信配置
+              wechatAppId: configData.wechat_app_id || prev.wechatAppId,
+              wechatAppSecret: configData.wechat_app_secret || prev.wechatAppSecret,
+            }))
+          }
+        }
+      } catch (error) {
+        console.error('加载配置失败:', error)
+      }
+    }
+    loadConfig()
+  }, [])
 
   const toggleSecret = (key: string) => {
     setShowSecrets((prev) => ({ ...prev, [key]: !prev[key] }))
@@ -120,13 +159,68 @@ export default function SettingsPage() {
   const handleSave = async () => {
     setLoading(true)
     try {
-      // TODO: Save to backend API
-      localStorage.setItem('config', JSON.stringify(config))
-      
+      // 确定当前使用的 AI 提供商
+      let aiProvider = 'openai'
+      let apiKey = config.openaiApiKey
+      let baseUrl = config.openaiBaseUrl
+      let model = config.openaiModel
+
+      // 如果 DeepSeek API Key 已配置（非空），则使用 DeepSeek
+      if (config.deepseekApiKey) {
+        aiProvider = 'deepseek'
+        apiKey = config.deepseekApiKey
+        baseUrl = config.deepseekBaseUrl
+        model = config.deepseekModel
+      }
+
+      const response = await fetch(`${API_URL}/api/config`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          ai_provider: aiProvider,
+          api_key: apiKey,
+          base_url: baseUrl,
+          model: model,
+          wechat_app_id: config.wechatAppId,
+          wechat_app_secret: config.wechatAppSecret,
+          enable_auto_publish: false,
+          max_news_count: 20,
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error('保存配置失败')
+      }
+
+      const result = await response.json()
+      console.log('保存配置成功:', result)
+
+      // 重新加载配置以确保同步
+      const reloadResponse = await fetch(`${API_URL}/api/config`)
+      if (reloadResponse.ok) {
+        const reloadData = await reloadResponse.json()
+        if (reloadData.success && reloadData.config) {
+          setServerConfig(reloadData.config)
+
+          // 更新前端状态
+          setConfig((prev) => ({
+            ...prev,
+            deepseekApiKey: reloadData.config.api_key || prev.deepseekApiKey,
+            deepseekBaseUrl: reloadData.config.base_url || prev.deepseekBaseUrl,
+            deepseekModel: reloadData.config.model || prev.deepseekModel,
+            wechatAppId: reloadData.config.wechat_app_id || prev.wechatAppId,
+            wechatAppSecret: reloadData.config.wechat_app_secret || prev.wechatAppSecret,
+          }))
+        }
+      }
+
       setSaved(true)
       setTimeout(() => setSaved(false), 3000)
     } catch (error) {
       console.error('Failed to save config:', error)
+      alert('保存配置失败，请检查网络连接')
     } finally {
       setLoading(false)
     }
@@ -135,10 +229,55 @@ export default function SettingsPage() {
   const handleTestConnection = async (type: string) => {
     setLoading(true)
     try {
-      // TODO: Test connection to backend
-      alert(`${type} 连接测试成功`)
+      let apiKey = ''
+      let baseUrl = ''
+      let model = ''
+
+      switch (type) {
+        case 'DeepSeek':
+          apiKey = config.deepseekApiKey
+          baseUrl = config.deepseekBaseUrl
+          model = config.deepseekModel
+          break
+        case 'OpenAI':
+          apiKey = config.openaiApiKey
+          baseUrl = config.openaiBaseUrl
+          model = config.openaiModel
+          break
+        default:
+          alert(`${type} 连接测试暂未实现`)
+          setLoading(false)
+          return
+      }
+
+      if (!apiKey) {
+        alert(`请先填写 ${type} 的 API Key`)
+        setLoading(false)
+        return
+      }
+
+      const response = await fetch(`${API_URL}/api/config/test-api`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          api_key: apiKey,
+          base_url: baseUrl,
+          model: model,
+        }),
+      })
+
+      const result = await response.json()
+      
+      if (result.success) {
+        alert(`${type} 连接测试成功！`)
+      } else {
+        alert(`${type} 连接测试失败：${result.message}`)
+      }
     } catch (error) {
-      alert(`${type} 连接测试失败`)
+      console.error('Test connection error:', error)
+      alert(`${type} 连接测试失败，请检查网络连接`)
     } finally {
       setLoading(false)
     }
@@ -214,6 +353,9 @@ export default function SettingsPage() {
 
       {/* Main Content */}
       <main className="container mx-auto px-4 py-6">
+        {/* 配置向导 */}
+        <ConfigWizard />
+        
         <Tabs defaultValue="llm" className="space-y-4">
           <TabsList className="grid w-full grid-cols-9 overflow-x-auto">
             <TabsTrigger value="llm">
@@ -907,7 +1049,7 @@ export default function SettingsPage() {
                   </h4>
                   <ol className="text-sm text-muted-foreground space-y-2 list-decimal list-inside">
                     <li>登录 <a href="https://mp.weixin.qq.com" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">微信公众平台</a></li>
-                    <li>进入 "开发 > 基本配置"</li>
+                    <li>进入 &quot;开发 &gt; 基本配置&quot;</li>
                     <li>查看 AppID 和生成 AppSecret</li>
                     <li>配置服务器地址和令牌（如果需要）</li>
                   </ol>

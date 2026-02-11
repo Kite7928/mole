@@ -1,29 +1,19 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Enum, JSON, Float, Boolean
-from sqlalchemy.orm import relationship
+from sqlalchemy import Column, Integer, String, Text, DateTime, Enum, Float, Boolean, Index
 from sqlalchemy.sql import func
 from ..core.database import Base
 import enum
 
 
 class ArticleStatus(str, enum.Enum):
-    DRAFT = "draft"
-    GENERATING = "generating"
-    READY = "ready"
-    PUBLISHED = "published"
-    FAILED = "failed"
-
-
-class ArticleSource(str, enum.Enum):
-    MANUAL = "manual"
-    AI_HOTSPOT = "ai_hotspot"
-    BAIDU_SEARCH = "baidu_search"
-    CUSTOM_RSS = "custom_rss"
+    DRAFT = "draft"           # 草稿
+    GENERATING = "generating" # 生成中
+    READY = "ready"           # 已完成
+    PUBLISHED = "published"   # 已发布
+    FAILED = "failed"         # 失败
 
 
 class Article(Base):
-    """
-    Article model for storing generated articles.
-    """
+    """文章模型"""
     __tablename__ = "articles"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -32,85 +22,57 @@ class Article(Base):
     content = Column(Text, nullable=False)
     html_content = Column(Text, nullable=True)
 
-    # Article metadata
+    # 文章状态
     status = Column(Enum(ArticleStatus), default=ArticleStatus.DRAFT, index=True)
-    source = Column(Enum(ArticleSource), default=ArticleSource.MANUAL)
-    source_topic = Column(String(500), nullable=True)
-    source_url = Column(String(1000), nullable=True)
 
-    # AI generation metadata
+    # 来源信息
+    source_topic = Column(String(500), nullable=True)  # 原始主题
+    source_url = Column(String(1000), nullable=True)   # 来源链接
+
+    # AI生成信息
     ai_model = Column(String(100), nullable=True)
-    ai_prompt_tokens = Column(Integer, nullable=True)
-    ai_completion_tokens = Column(Integer, nullable=True)
-    ai_total_tokens = Column(Integer, nullable=True)
 
-    # Cover image
+    # 封面图
     cover_image_url = Column(String(1000), nullable=True)
     cover_image_media_id = Column(String(200), nullable=True)
 
-    # WeChat specific
-    wechat_draft_id = Column(String(200), nullable=True)
-    wechat_publish_time = Column(DateTime(timezone=True), nullable=True)
-    wechat_article_id = Column(String(200), nullable=True)
+    # 微信相关
+    wechat_draft_id = Column(String(200), nullable=True)  # 草稿ID
+    wechat_publish_time = Column(DateTime, nullable=True)   # 发布时间
 
-    # Statistics
-    read_count = Column(Integer, default=0)
-    like_count = Column(Integer, default=0)
-    share_count = Column(Integer, default=0)
-    comment_count = Column(Integer, default=0)
+    # 质量评分
+    quality_score = Column(Float, nullable=True)           # 0-100分
 
-    # Tags and categories
-    tags = Column(JSON, nullable=True)  # List of tags
-    category = Column(String(100), nullable=True)
+    # 标签系统 - 以逗号分隔的标签字符串
+    tags = Column(String(1000), nullable=True, index=True)
 
-    # Quality metrics
-    quality_score = Column(Float, nullable=True)
-    predicted_click_rate = Column(Float, nullable=True)
+    # 阅读统计
+    view_count = Column(Integer, default=0)      # 阅读次数
+    like_count = Column(Integer, default=0)      # 点赞次数
 
-    # Timestamps
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    published_at = Column(DateTime(timezone=True), nullable=True)
+    # 时间戳
+    created_at = Column(DateTime, server_default=func.now(), index=True)
+    updated_at = Column(DateTime, onupdate=func.now())
 
-    # Relationships
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
-    account_id = Column(Integer, ForeignKey("wechat_accounts.id"), nullable=True)
+    # 定义复合索引以优化查询性能
+    __table_args__ = (
+        # 状态+创建时间复合索引：用于查询特定状态的文章（如已发布）
+        Index('ix_articles_status_created_at', 'status', 'created_at'),
+        # 标签+状态复合索引：用于按标签筛选文章
+        Index('ix_articles_tags_status', 'tags', 'status'),
+        # 点赞数索引：用于热门文章排序
+        Index('ix_articles_like_count', 'like_count'),
+    )
 
-    # Relationships
-    user = relationship("User", back_populates="articles")
-    account = relationship("WeChatAccount", back_populates="articles")
-    tasks = relationship("Task", back_populates="article", cascade="all, delete-orphan")
+    def get_tags_list(self) -> list:
+        """获取标签列表"""
+        if not self.tags:
+            return []
+        return [tag.strip() for tag in self.tags.split(',') if tag.strip()]
+
+    def set_tags_list(self, tags: list):
+        """设置标签列表"""
+        self.tags = ','.join(tags) if tags else None
 
     def __repr__(self):
         return f"<Article(id={self.id}, title='{self.title}', status='{self.status}')>"
-
-
-class ArticleTemplate(Base):
-    """
-    Article template model for predefined content structures.
-    """
-    __tablename__ = "article_templates"
-
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(200), nullable=False)
-    description = Column(Text, nullable=True)
-    template_type = Column(String(50), nullable=False)  # e.g., "tech_news", "product_review"
-
-    # Template structure
-    structure = Column(JSON, nullable=False)  # Template structure definition
-    prompt_template = Column(Text, nullable=False)  # AI prompt template
-
-    # Default settings
-    default_ai_model = Column(String(100), nullable=True)
-    default_temperature = Column(Float, nullable=True)
-    default_max_tokens = Column(Integer, nullable=True)
-
-    # Usage statistics
-    usage_count = Column(Integer, default=0)
-
-    # Timestamps
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-
-    def __repr__(self):
-        return f"<ArticleTemplate(id={self.id}, name='{self.name}', type='{self.template_type}')>"

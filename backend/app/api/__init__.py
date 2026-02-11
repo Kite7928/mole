@@ -1,3 +1,3 @@
-from . import health, articles, news, wechat, tasks, statistics
+from . import health, articles, news, wechat, config, unified_ai
 
-__all__ = ["health", "articles", "news", "wechat", "tasks", "statistics"]
+__all__ = ["health", "articles", "news", "wechat", "config", "unified_ai"]

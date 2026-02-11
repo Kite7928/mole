@@ -1,17 +1,16 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { 
-  LayoutDashboard, 
-  PenTool, 
-  FileText, 
-  Flame, 
-  BarChart3, 
-  Send, 
+import {
+  PenTool,
+  FileText,
+  Flame,
+  Send,
   Settings,
   X,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Menu
 } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
@@ -91,12 +90,9 @@ export default function ResizableSidebar({
   }
 
   const navItems = [
-    { icon: LayoutDashboard, label: '仪表板', href: '/' },
     { icon: PenTool, label: 'AI写作', href: '/articles/create' },
     { icon: FileText, label: '文章管理', href: '/articles' },
     { icon: Flame, label: '热点监控', href: '/hotspots' },
-    { icon: BarChart3, label: '数据统计', href: '/statistics' },
-    { icon: Send, label: '微信发布', href: '/editor' },
     { icon: Settings, label: '系统设置', href: '/settings' },
   ]
 
@@ -225,7 +221,7 @@ export default function ResizableSidebar({
         onClick={toggleMobileMenu}
         className="lg:hidden fixed bottom-6 right-6 z-50 p-4 rounded-full bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-lg shadow-indigo-500/30"
       >
-        {isMobileOpen ? <X size={24} /> : <LayoutDashboard size={24} />}
+        {isMobileOpen ? <X size={24} /> : <Menu size={24} />}
       </button>
     </>
   )

@@ -980,6 +980,50 @@
     @apply transition-all duration-200 ease-in-out;
   }
 
+  /* ========== 修复浏览器扩展冲突 ========== */
+  /* 确保所有按钮和可点击元素正常工作 */
+  button, 
+  [role="button"],
+  a,
+  input,
+  textarea,
+  select,
+  label,
+  .cursor-pointer {
+    pointer-events: auto !important;
+    position: relative;
+    z-index: 1;
+  }
+
+  /* 防止扩展插件覆盖点击事件 */
+  button *,
+  a *,
+  label * {
+    pointer-events: none;
+  }
+
+  /* 确保模态框和弹出层在顶层 */
+  [class*="fixed"],
+  [class*="modal"],
+  [class*="popover"],
+  [class*="dropdown"] {
+    pointer-events: auto !important;
+  }
+
+  /* 写作风格选择器增强 */
+  .writing-style-btn {
+    @apply relative cursor-pointer transition-all duration-200;
+    pointer-events: auto !important;
+  }
+
+  .writing-style-btn:hover {
+    @apply transform scale-[1.02];
+  }
+
+  .writing-style-btn:active {
+    @apply transform scale-[0.98];
+  }
+
   /* ========== 响应式动画 ========== */
   .animate-responsive {
     @apply animate-in fade-in slide-in-from-bottom-4 duration-300;

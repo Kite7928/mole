@@ -1,37 +1,44 @@
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import declarative_base
-from sqlalchemy import MetaData
 from typing import AsyncGenerator
 from .config import settings
+import os
 
-# Create async engine
+# 确保 SQLite 数据库目录存在
+# 处理不同格式的SQLite URL: sqlite:/// 或 sqlite+aiosqlite:///
+db_url = settings.DATABASE_URL
+if ":///" in db_url:
+    db_path = db_url.split(":///")[1]
+else:
+    db_path = db_url
+if db_path:
+    db_dir = os.path.dirname(db_path)
+    if db_dir and not os.path.exists(db_dir):
+        os.makedirs(db_dir, exist_ok=True)
+
+# 创建 SQLite 异步引擎
+# 注意：SQLite不支持pool_size和max_overflow参数
 engine = create_async_engine(
     settings.DATABASE_URL,
-    pool_size=settings.DATABASE_POOL_SIZE,
-    max_overflow=settings.DATABASE_MAX_OVERFLOW,
     echo=settings.DEBUG,
+    pool_recycle=settings.DB_POOL_RECYCLE if hasattr(settings, 'DB_POOL_RECYCLE') else 3600,
     pool_pre_ping=True,
 )
 
-# Create async session factory
+# 创建异步会话工厂
 async_session_maker = async_sessionmaker(
     engine,
     class_=AsyncSession,
     expire_on_commit=False,
-    autocommit=False,
-    autoflush=False,
 )
 
-# Create base class for models
+# 创建模型基类
 Base = declarative_base()
-
-# Metadata for migrations
-metadata = MetaData()
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """
-    Dependency function to get database session.
+    获取数据库会话的依赖函数
     """
     async with async_session_maker() as session:
         try:
@@ -44,9 +51,17 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             await session.close()
 
 
+async def get_db_session() -> AsyncSession:
+    """
+    获取数据库会话（用于非依赖注入场景）
+    """
+    async with async_session_maker() as session:
+        yield session
+
+
 async def init_db() -> None:
     """
-    Initialize database tables.
+    初始化数据库表
     """
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -54,6 +69,6 @@ async def init_db() -> None:
 
 async def close_db() -> None:
     """
-    Close database connections.
+    关闭数据库连接
     """
     await engine.dispose()

@@ -1,261 +1,343 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+"""
+文章管理API路由 - 简化版
+支持获取文章列表、创建文章、更新文章
+"""
+
+from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
-from typing import List, Optional
+from sqlalchemy import select
+from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 from datetime import datetime
 from ..core.database import get_db
 from ..core.logger import logger
-from ..models.article import Article, ArticleStatus, ArticleSource
-from ..services.ai_writer import ai_writer_service
-from ..services.image_service import image_service
+from ..models.article import Article, ArticleStatus
+from ..services.image_generation_service import image_generation_service
 
 router = APIRouter()
 
 
-# Pydantic models
-class ArticleCreateRequest(BaseModel):
-    topic: str = Field(..., description="Article topic")
-    title: Optional[str] = Field(None, description="Article title (optional, will be generated if not provided)")
-    source: ArticleSource = Field(ArticleSource.MANUAL, description="Article source")
-    style: str = Field("professional", description="Writing style")
-    length: str = Field("medium", description="Article length")
-    enable_research: bool = Field(False, description="Enable deep research")
-    generate_cover: bool = Field(True, description="Generate cover image")
-    ai_model: Optional[str] = Field(None, description="AI model to use")
-
-
-class TitleGenerateRequest(BaseModel):
-    topic: str = Field(..., description="Topic to generate titles for")
-    count: int = Field(5, ge=1, le=10, description="Number of titles to generate")
-    ai_model: Optional[str] = Field(None, description="AI model to use")
-
-
-class ContentGenerateRequest(BaseModel):
-    topic: str = Field(..., description="Article topic")
-    title: str = Field(..., description="Article title")
-    style: str = Field("professional", description="Writing style")
-    length: str = Field("medium", description="Article length")
-    enable_research: bool = Field(False, description="Enable deep research")
-    ai_model: Optional[str] = Field(None, description="AI model to use")
-
-
-class ContentOptimizeRequest(BaseModel):
-    article_id: int = Field(..., description="Article ID")
-    optimization_type: str = Field("enhance", description="Optimization type")
-    ai_model: Optional[str] = Field(None, description="AI model to use")
-
-
 class ArticleResponse(BaseModel):
+    """文章响应模型"""
     id: int
     title: str
     summary: Optional[str]
     content: str
-    status: ArticleStatus
-    source: ArticleSource
+    status: str
+    source_topic: Optional[str]
+    source_url: Optional[str]
+    wechat_draft_id: Optional[str]
+    quality_score: Optional[float]
     cover_image_url: Optional[str]
+    cover_image_media_id: Optional[str]
+    tags: Optional[List[str]] = []
+    view_count: int = 0
+    like_count: int = 0
     created_at: datetime
     updated_at: Optional[datetime]
 
     class Config:
         from_attributes = True
 
+    @classmethod
+    def from_article(cls, article: Article) -> "ArticleResponse":
+        """从 Article 模型创建响应"""
+        # 处理封面图片URL - 如果是相对路径,转换为完整URL
+        cover_image_url = article.cover_image_url
+        if cover_image_url and not cover_image_url.startswith(('http://', 'https://')):
+            # 移除开头的 backend/ 或 uploads/ 前缀
+            if cover_image_url.startswith('backend/'):
+                cover_image_url = cover_image_url[8:]  # 移除 "backend/"
+            if cover_image_url.startswith('uploads/'):
+                cover_image_url = cover_image_url[8:]  # 移除 "uploads/"
+            # 添加后端服务器地址
+            from ..core.config import settings
+            cover_image_url = f"http://localhost:{settings.PORT}/uploads/{cover_image_url}"
 
-class TitleResponse(BaseModel):
-    title: str
-    predicted_click_rate: float
-    emotion: str
-
-
-# Endpoints
-@router.post("/titles/generate", response_model=List[TitleResponse])
-async def generate_titles(request: TitleGenerateRequest):
-    """Generate multiple article titles based on topic."""
-    try:
-        logger.info(f"Generating titles for topic: {request.topic}")
-
-        titles = await ai_writer_service.generate_titles(
-            topic=request.topic,
-            count=request.count,
-            model=request.ai_model
+        return cls(
+            id=article.id,
+            title=article.title,
+            summary=article.summary,
+            content=article.content,
+            status=article.status.value if isinstance(article.status, ArticleStatus) else article.status,
+            source_topic=article.source_topic,
+            source_url=article.source_url,
+            wechat_draft_id=article.wechat_draft_id,
+            quality_score=article.quality_score,
+            cover_image_url=cover_image_url,
+            cover_image_media_id=article.cover_image_media_id,
+            tags=article.get_tags_list(),
+            view_count=article.view_count,
+            like_count=article.like_count,
+            created_at=article.created_at,
+            updated_at=article.updated_at,
         )
 
-        return titles
 
-    except Exception as e:
-        logger.error(f"Error generating titles: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/content/generate")
-async def generate_content(request: ContentGenerateRequest):
-    """Generate article content based on topic and title."""
-    try:
-        logger.info(f"Generating content for: {request.title}")
-
-        content = await ai_writer_service.generate_content(
-            topic=request.topic,
-            title=request.title,
-            style=request.style,
-            length=request.length,
-            enable_research=request.enable_research,
-            model=request.ai_model
-        )
-
-        return content
-
-    except Exception as e:
-        logger.error(f"Error generating content: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+class CreateArticleRequest(BaseModel):
+    """创建文章请求"""
+    title: str = Field(..., description="文章标题")
+    content: str = Field(..., description="文章内容")
+    summary: Optional[str] = Field(None, description="文章摘要")
+    source_topic: Optional[str] = Field(None, description="来源主题")
+    source_url: Optional[str] = Field(None, description="来源链接")
+    status: str = Field(default="draft", description="文章状态")
+    tags: Optional[List[str]] = Field(default=None, description="文章标签列表")
+    # 图片生成参数
+    generate_cover_image: bool = Field(default=True, description="是否生成封面图")
+    image_style: str = Field(default="professional", description="图片风格 (professional/creative/minimal/vibrant)")
+    image_provider: str = Field(default="dalle", description="图片生成提供商 (dalle/midjourney/stable-diffusion)")
 
 
-@router.post("/optimize/{article_id}")
-async def optimize_article_content(
-    article_id: int,
-    request: ContentOptimizeRequest,
+class UpdateArticleRequest(BaseModel):
+    """更新文章请求"""
+    title: Optional[str] = Field(None, description="文章标题")
+    content: Optional[str] = Field(None, description="文章内容")
+    summary: Optional[str] = Field(None, description="文章摘要")
+    status: Optional[str] = Field(None, description="文章状态")
+    wechat_draft_id: Optional[str] = Field(None, description="微信草稿ID")
+    quality_score: Optional[float] = Field(None, description="质量评分")
+    cover_image_url: Optional[str] = Field(None, description="封面图URL")
+    tags: Optional[List[str]] = Field(None, description="文章标签列表")
+    # 图片生成参数
+    regenerate_cover_image: bool = Field(default=False, description="是否重新生成封面图")
+    image_style: str = Field(default="professional", description="图片风格")
+    image_provider: str = Field(default="dalle", description="图片生成提供商")
+
+
+@router.get("/", response_model=List[ArticleResponse])
+async def get_articles(
+    skip: int = 0,
+    limit: int = 20,
+    status: Optional[str] = None,
+    sort_field: str = "created_at",
+    sort_order: str = "desc",
     db: AsyncSession = Depends(get_db)
 ):
-    """Optimize article content."""
+    """
+    获取文章列表
+
+    Args:
+        skip: 跳过数量
+        limit: 返回数量
+        status: 状态筛选
+        sort_field: 排序字段 (created_at, updated_at, like_count)
+        sort_order: 排序方向 (asc, desc)
+        db: 数据库会话
+
+    Returns:
+        文章列表
+    """
     try:
-        # Get article
-        result = await db.execute(select(Article).where(Article.id == article_id))
+        # 验证排序字段是否在白名单中
+        valid_sort_fields = {"created_at", "updated_at", "like_count"}
+        if sort_field not in valid_sort_fields:
+            sort_field = "created_at"
+
+        # 验证排序方向
+        if sort_order not in {"asc", "desc"}:
+            sort_order = "desc"
+
+        # 根据排序字段构建排序逻辑
+        sort_column = getattr(Article, sort_field)
+        if sort_order == "asc":
+            query = select(Article).order_by(sort_column.asc())
+        else:
+            query = select(Article).order_by(sort_column.desc())
+
+        if status:
+            query = query.where(Article.status == status)
+
+        query = query.offset(skip).limit(limit)
+
+        result = await db.execute(query)
+        articles = result.scalars().all()
+
+        return [ArticleResponse.from_article(article) for article in articles]
+
+    except Exception as e:
+        logger.error(f"获取文章列表失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取文章列表失败: {str(e)}")
+
+
+@router.get("/{article_id}", response_model=ArticleResponse)
+async def get_article(article_id: int, db: AsyncSession = Depends(get_db)):
+    """
+    获取文章详情
+    
+    Args:
+        article_id: 文章ID
+        db: 数据库会话
+    
+    Returns:
+        文章详情
+    """
+    try:
+        query = select(Article).where(Article.id == article_id)
+        result = await db.execute(query)
         article = result.scalar_one_or_none()
-
+        
         if not article:
-            raise HTTPException(status_code=404, detail="Article not found")
-
-        # Optimize content
-        optimized_content = await ai_writer_service.optimize_content(
-            content=article.content,
-            optimization_type=request.optimization_type,
-            model=request.ai_model
-        )
-
-        # Update article
-        article.content = optimized_content
-        article.updated_at = datetime.utcnow()
-        await db.commit()
-
-        return {
-            "message": "Content optimized successfully",
-            "content": optimized_content
-        }
-
+            raise HTTPException(status_code=404, detail="文章不存在")
+        
+        return ArticleResponse.from_article(article)
+        
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error optimizing content: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"获取文章详情失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取文章详情失败: {str(e)}")
 
 
 @router.post("/", response_model=ArticleResponse)
 async def create_article(
-    request: ArticleCreateRequest,
+    request: CreateArticleRequest,
     db: AsyncSession = Depends(get_db)
 ):
-    """Create a new article."""
+    """
+    创建文章（支持自动生成封面图）
+
+    Args:
+        request: 创建文章请求
+        db: 数据库会话
+
+    Returns:
+        创建的文章
+    """
     try:
-        logger.info(f"Creating article for topic: {request.topic}")
+        logger.info(f"创建文章，标题: {request.title}")
 
-        # Generate title if not provided
-        if not request.title:
-            titles = await ai_writer_service.generate_titles(
-                topic=request.topic,
-                count=1,
-                model=request.ai_model
-            )
-            request.title = titles[0]["title"]
-
-        # Generate content
-        content_data = await ai_writer_service.generate_content(
-            topic=request.topic,
-            title=request.title,
-            style=request.style,
-            length=request.length,
-            enable_research=request.enable_research,
-            model=request.ai_model
-        )
-
-        # Generate cover image if requested
-        cover_image_url = None
-        if request.generate_cover:
-            keywords = request.topic[:50]
-            cover_image_url = await image_service.search_cover_image(keywords)
-
-        # Create article record
         article = Article(
             title=request.title,
-            summary=content_data.get("summary"),
-            content=content_data.get("content"),
-            html_content=content_data.get("content"),  # TODO: Convert to HTML
-            source=request.source,
-            source_topic=request.topic,
-            status=ArticleStatus.READY,
-            ai_model=request.ai_model or "default",
-            cover_image_url=cover_image_url,
-            tags=content_data.get("tags"),
-            quality_score=content_data.get("quality_score")
+            content=request.content,
+            summary=request.summary,
+            source_topic=request.source_topic,
+            source_url=request.source_url,
+            status=ArticleStatus(request.status)
         )
+
+        # 设置标签
+        if request.tags:
+            cleaned_tags = [tag.strip()[:50] for tag in request.tags if tag.strip()]
+            cleaned_tags = list(dict.fromkeys(cleaned_tags))[:10]
+            article.set_tags_list(cleaned_tags)
 
         db.add(article)
         await db.commit()
         await db.refresh(article)
 
-        logger.info(f"Article created: {article.id}")
-        return article
+        # 生成封面图
+        if request.generate_cover_image:
+            try:
+                logger.info(f"开始生成封面图，主题: {request.source_topic or request.title}, 提供商: {request.image_provider}, 风格: {request.image_style}")
+                topic = request.source_topic or request.title
+                cover_image = await image_generation_service.generate_article_cover(
+                    topic=topic,
+                    style=request.image_style,
+                    provider=request.image_provider
+                )
+
+                if cover_image and cover_image.get("url"):
+                    article.cover_image_url = cover_image["url"]
+                    await db.commit()
+                    await db.refresh(article)
+                    logger.info(f"封面图生成成功: {article.cover_image_url}")
+                else:
+                    logger.warning(f"封面图生成失败，返回结果: {cover_image}")
+
+            except Exception as img_error:
+                logger.exception(f"生成封面图失败: {str(img_error)}")
+                # 不影响文章创建，只记录错误
+
+        logger.info(f"文章创建成功，ID: {article.id}")
+        return ArticleResponse.from_article(article)
 
     except Exception as e:
-        logger.error(f"Error creating article: {str(e)}")
+        logger.error(f"创建文章失败: {str(e)}")
         await db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"创建文章失败: {str(e)}")
 
 
-@router.get("/", response_model=List[ArticleResponse])
-async def list_articles(
-    skip: int = Query(0, ge=0),
-    limit: int = Query(20, ge=1, le=100),
-    status: Optional[ArticleStatus] = None,
-    db: AsyncSession = Depends(get_db)
-):
-    """List articles with pagination."""
-    try:
-        query = select(Article)
-
-        if status:
-            query = query.where(Article.status == status)
-
-        query = query.order_by(Article.created_at.desc()).offset(skip).limit(limit)
-
-        result = await db.execute(query)
-        articles = result.scalars().all()
-
-        return articles
-
-    except Exception as e:
-        logger.error(f"Error listing articles: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/{article_id}", response_model=ArticleResponse)
-async def get_article(
+@router.put("/{article_id}", response_model=ArticleResponse)
+async def update_article(
     article_id: int,
+    request: UpdateArticleRequest,
     db: AsyncSession = Depends(get_db)
 ):
-    """Get article by ID."""
+    """
+    更新文章（支持更新封面图）
+
+    Args:
+        article_id: 文章ID
+        request: 更新文章请求
+        db: 数据库会话
+
+    Returns:
+        更新后的文章
+    """
     try:
-        result = await db.execute(select(Article).where(Article.id == article_id))
+        logger.info(f"更新文章，ID: {article_id}")
+
+        query = select(Article).where(Article.id == article_id)
+        result = await db.execute(query)
         article = result.scalar_one_or_none()
 
         if not article:
-            raise HTTPException(status_code=404, detail="Article not found")
+            raise HTTPException(status_code=404, detail="文章不存在")
 
-        return article
+        # 更新字段
+        if request.title is not None:
+            article.title = request.title
+        if request.content is not None:
+            article.content = request.content
+        if request.summary is not None:
+            article.summary = request.summary
+        if request.status is not None:
+            article.status = ArticleStatus(request.status)
+        if request.wechat_draft_id is not None:
+            article.wechat_draft_id = request.wechat_draft_id
+        if request.quality_score is not None:
+            article.quality_score = request.quality_score
+        if request.cover_image_url is not None:
+            article.cover_image_url = request.cover_image_url
+        if request.tags is not None:
+            cleaned_tags = [tag.strip()[:50] for tag in request.tags if tag.strip()]
+            cleaned_tags = list(dict.fromkeys(cleaned_tags))[:10]
+            article.set_tags_list(cleaned_tags)
+
+        # 重新生成封面图
+        if request.regenerate_cover_image:
+            try:
+                logger.info(f"开始重新生成封面图，文章ID: {article_id}")
+                topic = article.source_topic or article.title
+                cover_image = await image_generation_service.generate_article_cover(
+                    topic=topic,
+                    style=request.image_style,
+                    provider=request.image_provider
+                )
+
+                if cover_image and cover_image.get("url"):
+                    article.cover_image_url = cover_image["url"]
+                    logger.info(f"封面图重新生成成功: {article.cover_image_url}")
+                else:
+                    logger.warning("封面图重新生成失败，未返回有效的图片URL")
+
+            except Exception as img_error:
+                logger.error(f"重新生成封面图失败: {str(img_error)}")
+                # 不影响文章更新，只记录错误
+
+        await db.commit()
+        await db.refresh(article)
+
+        logger.info(f"文章更新成功，ID: {article_id}")
+        return ArticleResponse.from_article(article)
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error getting article: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"更新文章失败: {str(e)}")
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"更新文章失败: {str(e)}")
 
 
 @router.delete("/{article_id}")
@@ -263,21 +345,1141 @@ async def delete_article(
     article_id: int,
     db: AsyncSession = Depends(get_db)
 ):
-    """Delete article by ID."""
+    """
+    删除文章
+
+    Args:
+        article_id: 文章ID
+        db: 数据库会话
+
+    Returns:
+        删除结果
+    """
     try:
-        result = await db.execute(select(Article).where(Article.id == article_id))
+        logger.info(f"删除文章，ID: {article_id}")
+
+        # 查询文章
+        query = select(Article).where(Article.id == article_id)
+        result = await db.execute(query)
         article = result.scalar_one_or_none()
 
         if not article:
-            raise HTTPException(status_code=404, detail="Article not found")
+            raise HTTPException(status_code=404, detail="文章不存在")
 
+        # 删除文章
         await db.delete(article)
         await db.commit()
 
-        return {"message": "Article deleted successfully"}
+        logger.info(f"文章删除成功，ID: {article_id}")
+        return {"success": True, "message": "文章删除成功"}
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error deleting article: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"删除文章失败: {str(e)}")
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"删除文章失败: {str(e)}")
+
+
+@router.post("/{article_id}/copy", response_model=ArticleResponse)
+async def copy_article(
+    article_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    复制文章
+
+    Args:
+        article_id: 文章ID
+        db: 数据库会话
+
+    Returns:
+        复制后的新文章
+    """
+    try:
+        logger.info(f"复制文章，ID: {article_id}")
+
+        # 查询原文章
+        query = select(Article).where(Article.id == article_id)
+        result = await db.execute(query)
+        original_article = result.scalar_one_or_none()
+
+        if not original_article:
+            raise HTTPException(status_code=404, detail="文章不存在")
+
+        # 创建新文章副本
+        new_article = Article(
+            title=f"{original_article.title} (副本)",
+            content=original_article.content,
+            summary=original_article.summary,
+            source_topic=original_article.source_topic,
+            source_url=original_article.source_url,
+            status=ArticleStatus.DRAFT,  # 副本默认为草稿状态
+            quality_score=original_article.quality_score,
+            cover_image_url=original_article.cover_image_url,
+            tags=original_article.tags
+        )
+
+        db.add(new_article)
+        await db.commit()
+        await db.refresh(new_article)
+
+        logger.info(f"文章复制成功，原ID: {article_id}, 新ID: {new_article.id}")
+        return ArticleResponse.from_article(new_article)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"复制文章失败: {str(e)}")
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"复制文章失败: {str(e)}")
+
+
+class GenerateCoverImageRequest(BaseModel):
+    """生成封面图请求"""
+    topic: str = Field(..., description="文章主题")
+    style: str = Field(default="professional", description="图片风格")
+    provider: str = Field(default="dalle", description="图片生成提供商")
+
+
+class GenerateBatchCoverImagesRequest(BaseModel):
+    """批量生成封面图请求"""
+    topic: str = Field(..., description="文章主题")
+    style: str = Field(default="professional", description="图片风格")
+    provider: str = Field(default="dalle", description="图片生成提供商")
+    n: int = Field(default=3, ge=1, le=5, description="生成数量（1-5）")
+
+
+@router.post("/generate-batch-covers", response_model=List[Dict[str, Any]])
+async def generate_batch_cover_images(
+    request: GenerateBatchCoverImagesRequest
+):
+    """
+    批量生成封面图
+
+    Args:
+        request: 批量生成请求
+
+    Returns:
+        生成的封面图列表
+    """
+    try:
+        logger.info(f"批量生成封面图，主题: {request.topic}, 数量: {request.n}")
+
+        # 批量生成封面图
+        images = await image_generation_service.generate_batch_article_covers(
+            topic=request.topic,
+            style=request.style,
+            provider=request.provider,
+            n=request.n
+        )
+
+        return images
+
+    except Exception as e:
+        logger.error(f"批量生成封面图失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"批量生成失败: {str(e)}")
+
+
+@router.post("/{article_id}/generate-cover", response_model=Dict[str, Any])
+async def generate_article_cover_image(
+    article_id: int,
+    request: GenerateCoverImageRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    为文章生成封面图
+
+    Args:
+        article_id: 文章ID
+        request: 生成封面图请求
+        db: 数据库会话
+
+    Returns:
+        生成的封面图信息
+    """
+    try:
+        logger.info(f"为文章生成封面图，ID: {article_id}")
+
+        # 获取文章
+        query = select(Article).where(Article.id == article_id)
+        result = await db.execute(query)
+        article = result.scalar_one_or_none()
+
+        if not article:
+            raise HTTPException(status_code=404, detail="文章不存在")
+
+        # 生成封面图
+        cover_image = await image_generation_service.generate_article_cover(
+            topic=request.topic,
+            style=request.style,
+            provider=request.provider
+        )
+
+        if not cover_image or not cover_image.get("url"):
+            raise HTTPException(status_code=500, detail="生成封面图失败")
+
+        # 更新文章
+        article.cover_image_url = cover_image["url"]
+        await db.commit()
+        await db.refresh(article)
+
+        logger.info(f"封面图生成成功: {article.cover_image_url}")
+
+        return {
+            "article_id": article_id,
+            "cover_image_url": article.cover_image_url,
+            "image_style": request.style,
+            "image_provider": request.provider,
+            "prompt": cover_image.get("prompt")
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"生成封面图失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"生成封面图失败: {str(e)}")
+
+
+
+
+# ========== AI生成选题大纲功能 ==========
+
+
+
+from ..services.unified_ai_service import unified_ai_service
+
+
+
+
+
+class GenerateOutlinesRequest(BaseModel):
+
+    """生成大纲请求"""
+
+    topic: str = Field(..., description="热点主题")
+
+    source_url: Optional[str] = Field(None, description="来源链接")
+
+
+
+
+
+@router.post("/generate-outlines", response_model=Dict[str, Any])
+async def generate_article_outlines(
+    request: GenerateOutlinesRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    AI生成3种差异化文章大纲
+    """
+    try:
+        logger.info(f"生成文章大纲，主题: {request.topic}")
+
+        # 从数据库获取配置
+        from ..models.config import AppConfig
+        query = select(AppConfig).order_by(AppConfig.id.desc())
+        result = await db.execute(query)
+        config = result.scalar_one_or_none()
+
+        if not config or not config.api_key:
+            return {
+                "success": False,
+                "topic": request.topic,
+                "outlines": [],
+                "error": "请先在设置中配置AI API Key"
+            }
+
+        # 创建OpenAI客户端
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(
+            api_key=config.api_key,
+            base_url=config.base_url
+        )
+
+        # 调用AI生成大纲
+        prompt = f"""请为主题「{request.topic}」生成3种差异化的文章大纲。
+
+要求：
+1. 每种大纲从不同角度切入（如：技术解读、行业影响、实用指南）
+2. 每种大纲包含：角度名称、核心观点、3-4个章节要点
+3. 用中文JSON格式返回
+
+返回格式：
+{{
+  "outlines": [
+    {{
+      "angle": "角度名称",
+      "title": "建议标题",
+      "points": ["要点1", "要点2", "要点3"]
+    }}
+  ]
+}}"""
+
+        response = await client.chat.completions.create(
+            model=config.model,
+            messages=[
+                {"role": "system", "content": "你是一位资深科技自媒体主编"},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.8,
+            max_tokens=2000
+        )
+
+        content = response.choices[0].message.content
+
+        # 解析JSON响应
+        import json
+        import re
+
+        # 提取JSON部分
+        json_match = re.search(r'\{.*\}', content, re.DOTALL)
+        if json_match:
+            content = json_match.group(0)
+
+        data = json.loads(content)
+        outlines = data.get("outlines", [])
+
+        # 关闭客户端
+        await client.close()
+
+        return {
+            "success": True,
+            "topic": request.topic,
+            "outlines": outlines,
+            "ai_provider": config.ai_provider
+        }
+
+    except Exception as e:
+        logger.error(f"生成大纲失败: {str(e)}")
+        return {
+            "success": False,
+            "topic": request.topic,
+            "outlines": [],
+            "error": str(e)
+        }
+
+
+# ============ 批量操作API ============
+
+class BatchDeleteRequest(BaseModel):
+    """批量删除请求"""
+    article_ids: List[int] = Field(..., description="要删除的文章ID列表")
+
+
+class BatchUpdateStatusRequest(BaseModel):
+    """批量更新状态请求"""
+    article_ids: List[int] = Field(..., description="要更新的文章ID列表")
+    status: str = Field(..., description="新状态")
+
+
+class BatchPublishRequest(BaseModel):
+    """批量发布请求"""
+    article_ids: List[int] = Field(..., description="要发布的文章ID列表")
+
+
+class BatchOperationResponse(BaseModel):
+    """批量操作响应"""
+    success: bool
+    message: str
+    processed: int
+    failed: int
+    details: List[Dict[str, Any]]
+
+
+@router.post("/batch/delete", response_model=BatchOperationResponse)
+async def batch_delete_articles(
+    request: BatchDeleteRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    批量删除文章
+    
+    Args:
+        request: 批量删除请求
+        db: 数据库会话
+    
+    Returns:
+        操作结果
+    """
+    processed = 0
+    failed = 0
+    details = []
+    
+    for article_id in request.article_ids:
+        try:
+            query = select(Article).where(Article.id == article_id)
+            result = await db.execute(query)
+            article = result.scalar_one_or_none()
+            
+            if article:
+                await db.delete(article)
+                processed += 1
+                details.append({"id": article_id, "status": "deleted"})
+            else:
+                failed += 1
+                details.append({"id": article_id, "status": "not_found"})
+        except Exception as e:
+            failed += 1
+            details.append({"id": article_id, "status": "error", "error": str(e)})
+    
+    await db.commit()
+    
+    return BatchOperationResponse(
+        success=failed == 0,
+        message=f"批量删除完成：成功 {processed} 个，失败 {failed} 个",
+        processed=processed,
+        failed=failed,
+        details=details
+    )
+
+
+@router.post("/batch/update-status", response_model=BatchOperationResponse)
+async def batch_update_status(
+    request: BatchUpdateStatusRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    批量更新文章状态
+    
+    Args:
+        request: 批量更新请求
+        db: 数据库会话
+    
+    Returns:
+        操作结果
+    """
+    processed = 0
+    failed = 0
+    details = []
+    
+    try:
+        # 验证状态值
+        if request.status not in [s.value for s in ArticleStatus]:
+            raise HTTPException(status_code=400, detail=f"无效的状态值: {request.status}")
+        
+        for article_id in request.article_ids:
+            try:
+                query = select(Article).where(Article.id == article_id)
+                result = await db.execute(query)
+                article = result.scalar_one_or_none()
+                
+                if article:
+                    article.status = ArticleStatus(request.status)
+                    processed += 1
+                    details.append({"id": article_id, "status": "updated"})
+                else:
+                    failed += 1
+                    details.append({"id": article_id, "status": "not_found"})
+            except Exception as e:
+                failed += 1
+                details.append({"id": article_id, "status": "error", "error": str(e)})
+        
+        await db.commit()
+        
+        return BatchOperationResponse(
+            success=failed == 0,
+            message=f"批量更新完成：成功 {processed} 个，失败 {failed} 个",
+            processed=processed,
+            failed=failed,
+            details=details
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"批量更新失败: {str(e)}")
+
+
+@router.post("/batch/publish-wechat", response_model=BatchOperationResponse)
+async def batch_publish_wechat(
+    request: BatchPublishRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    批量发布到微信草稿箱
+    
+    Args:
+        request: 批量发布请求
+        db: 数据库会话
+    
+    Returns:
+        操作结果
+    """
+    from ..services.wechat_service import wechat_service
+    
+    processed = 0
+    failed = 0
+    details = []
+    
+    for article_id in request.article_ids:
+        try:
+            query = select(Article).where(Article.id == article_id)
+            result = await db.execute(query)
+            article = result.scalar_one_or_none()
+            
+            if not article:
+                failed += 1
+                details.append({"id": article_id, "status": "not_found"})
+                continue
+            
+            # 发布到微信
+            result = await wechat_service.publish_draft(
+                title=article.title,
+                content=article.content,
+                cover_image_url=article.cover_image_url
+            )
+            
+            if result.get("success"):
+                article.wechat_draft_id = result.get("draft_id")
+                article.status = ArticleStatus.PUBLISHED
+                processed += 1
+                details.append({
+                    "id": article_id,
+                    "status": "published",
+                    "draft_id": result.get("draft_id")
+                })
+            else:
+                failed += 1
+                details.append({
+                    "id": article_id,
+                    "status": "failed",
+                    "error": result.get("error", "发布失败")
+                })
+        except Exception as e:
+            failed += 1
+            details.append({"id": article_id, "status": "error", "error": str(e)})
+    
+    await db.commit()
+    
+    return BatchOperationResponse(
+        success=failed == 0,
+        message=f"批量发布完成：成功 {processed} 个，失败 {failed} 个",
+        processed=processed,
+        failed=failed,
+        details=details
+    )
+
+
+@router.get("/stats/overview", response_model=Dict[str, Any])
+async def get_article_stats(db: AsyncSession = Depends(get_db)):
+    """
+    获取文章统计概览
+    
+    Returns:
+        统计数据
+    """
+    try:
+        # 总文章数
+        from sqlalchemy import func
+        total_query = select(func.count(Article.id))
+        total_result = await db.execute(total_query)
+        total = total_result.scalar()
+        
+        # 各状态统计
+        status_counts = {}
+        for status in ArticleStatus:
+            count_query = select(func.count(Article.id)).where(Article.status == status)
+            count_result = await db.execute(count_query)
+            status_counts[status.value] = count_result.scalar()
+        
+        # 最近7天创建的文章数
+        from datetime import datetime, timedelta
+        week_ago = datetime.now() - timedelta(days=7)
+        recent_query = select(func.count(Article.id)).where(Article.created_at >= week_ago)
+        recent_result = await db.execute(recent_query)
+        recent = recent_result.scalar()
+        
+        return {
+            "success": True,
+            "total": total,
+            "status_counts": status_counts,
+            "recent_7days": recent,
+            "published": status_counts.get("published", 0),
+            "draft": status_counts.get("draft", 0),
+            "ready": status_counts.get("ready", 0)
+        }
+    except Exception as e:
+        logger.error(f"获取统计失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取统计失败: {str(e)}")
+
+
+# ============ 标签管理API ============
+
+class UpdateTagsRequest(BaseModel):
+    """更新标签请求"""
+    tags: List[str] = Field(..., description="标签列表")
+
+
+class AddTagRequest(BaseModel):
+    """添加标签请求"""
+    tag: str = Field(..., description="标签名称", min_length=1, max_length=50)
+
+
+class RemoveTagRequest(BaseModel):
+    """移除标签请求"""
+    tag: str = Field(..., description="要移除的标签")
+
+
+@router.get("/{article_id}/tags")
+async def get_article_tags(article_id: int, db: AsyncSession = Depends(get_db)):
+    """
+    获取文章标签
+    
+    Args:
+        article_id: 文章ID
+        db: 数据库会话
+    
+    Returns:
+        标签列表
+    """
+    try:
+        query = select(Article).where(Article.id == article_id)
+        result = await db.execute(query)
+        article = result.scalar_one_or_none()
+        
+        if not article:
+            raise HTTPException(status_code=404, detail="文章不存在")
+        
+        return {
+            "success": True,
+            "article_id": article_id,
+            "tags": article.get_tags_list()
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取标签失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取标签失败: {str(e)}")
+
+
+@router.put("/{article_id}/tags")
+async def update_article_tags(
+    article_id: int,
+    request: UpdateTagsRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    更新文章标签（覆盖原有标签）
+    
+    Args:
+        article_id: 文章ID
+        request: 标签更新请求
+        db: 数据库会话
+    
+    Returns:
+        更新结果
+    """
+    try:
+        query = select(Article).where(Article.id == article_id)
+        result = await db.execute(query)
+        article = result.scalar_one_or_none()
+        
+        if not article:
+            raise HTTPException(status_code=404, detail="文章不存在")
+        
+        # 清理标签（去除空白，限制长度）
+        cleaned_tags = [tag.strip()[:50] for tag in request.tags if tag.strip()]
+        # 去重并保持顺序
+        cleaned_tags = list(dict.fromkeys(cleaned_tags))[:10]  # 最多10个标签
+        
+        article.set_tags_list(cleaned_tags)
+        await db.commit()
+        
+        return {
+            "success": True,
+            "article_id": article_id,
+            "tags": cleaned_tags,
+            "message": "标签更新成功"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"更新标签失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"更新标签失败: {str(e)}")
+
+
+@router.post("/{article_id}/tags/add")
+async def add_article_tag(
+    article_id: int,
+    request: AddTagRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    添加单个标签到文章
+    
+    Args:
+        article_id: 文章ID
+        request: 添加标签请求
+        db: 数据库会话
+    
+    Returns:
+        更新结果
+    """
+    try:
+        query = select(Article).where(Article.id == article_id)
+        result = await db.execute(query)
+        article = result.scalar_one_or_none()
+        
+        if not article:
+            raise HTTPException(status_code=404, detail="文章不存在")
+        
+        current_tags = article.get_tags_list()
+        new_tag = request.tag.strip()[:50]
+        
+        if new_tag not in current_tags:
+            current_tags.append(new_tag)
+            article.set_tags_list(current_tags)
+            await db.commit()
+        
+        return {
+            "success": True,
+            "article_id": article_id,
+            "tags": article.get_tags_list(),
+            "message": f"标签 '{new_tag}' 添加成功"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"添加标签失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"添加标签失败: {str(e)}")
+
+
+@router.post("/{article_id}/tags/remove")
+async def remove_article_tag(
+    article_id: int,
+    request: RemoveTagRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    从文章移除单个标签
+    
+    Args:
+        article_id: 文章ID
+        request: 移除标签请求
+        db: 数据库会话
+    
+    Returns:
+        更新结果
+    """
+    try:
+        query = select(Article).where(Article.id == article_id)
+        result = await db.execute(query)
+        article = result.scalar_one_or_none()
+        
+        if not article:
+            raise HTTPException(status_code=404, detail="文章不存在")
+        
+        current_tags = article.get_tags_list()
+        tag_to_remove = request.tag.strip()
+        
+        if tag_to_remove in current_tags:
+            current_tags.remove(tag_to_remove)
+            article.set_tags_list(current_tags)
+            await db.commit()
+        
+        return {
+            "success": True,
+            "article_id": article_id,
+            "tags": article.get_tags_list(),
+            "message": f"标签 '{tag_to_remove}' 移除成功"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"移除标签失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"移除标签失败: {str(e)}")
+
+
+@router.get("/tags/all")
+async def get_all_tags(db: AsyncSession = Depends(get_db)):
+    """
+    获取所有文章标签统计
+    
+    Returns:
+        标签列表及使用次数
+    """
+    try:
+        from sqlalchemy import func
+        
+        # 获取所有文章的标签
+        query = select(Article.tags).where(Article.tags.isnot(None))
+        result = await db.execute(query)
+        all_tags_records = result.scalars().all()
+        
+        # 统计标签使用次数
+        tag_counts = {}
+        for tags_str in all_tags_records:
+            if tags_str:
+                for tag in tags_str.split(','):
+                    tag = tag.strip()
+                    if tag:
+                        tag_counts[tag] = tag_counts.get(tag, 0) + 1
+        
+        # 按使用次数排序
+        sorted_tags = sorted(tag_counts.items(), key=lambda x: x[1], reverse=True)
+        
+        return {
+            "success": True,
+            "tags": [
+                {"name": tag, "count": count}
+                for tag, count in sorted_tags
+            ],
+            "total_unique": len(sorted_tags)
+        }
+    except Exception as e:
+        logger.error(f"获取标签统计失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取标签统计失败: {str(e)}")
+
+
+@router.get("/tags/search")
+async def search_articles_by_tag(
+    tag: str,
+    skip: int = 0,
+    limit: int = 20,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    根据标签搜索文章
+    
+    Args:
+        tag: 标签名称
+        skip: 跳过数量
+        limit: 返回数量
+        db: 数据库会话
+    
+    Returns:
+        匹配的文章列表
+    """
+    try:
+        # 使用LIKE进行模糊匹配
+        search_pattern = f"%{tag}%"
+        query = select(Article).where(
+            Article.tags.like(search_pattern)
+        ).order_by(Article.created_at.desc()).offset(skip).limit(limit)
+        
+        result = await db.execute(query)
+        articles = result.scalars().all()
+        
+        return {
+            "success": True,
+            "tag": tag,
+            "articles": articles,
+            "total": len(articles)
+        }
+    except Exception as e:
+        logger.error(f"搜索标签失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"搜索标签失败: {str(e)}")
+
+
+@router.get("/stats/trend")
+async def get_article_trend(
+    days: int = 7,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    获取文章创建趋势统计
+
+    Args:
+        days: 统计天数（默认7天）
+        db: 数据库会话
+
+    Returns:
+        趋势数据列表
+    """
+    try:
+        from datetime import timedelta, datetime as dt
+        from sqlalchemy import func, extract
+
+        # 计算开始日期
+        end_date = dt.utcnow()
+        start_date = end_date - timedelta(days - 1)
+
+        # 按日期分组统计
+        query = select(
+            func.date(Article.created_at).label('date'),
+            func.count(Article.id).label('count')
+        ).where(
+            func.date(Article.created_at) >= start_date.date()
+        ).group_by(
+            func.date(Article.created_at)
+        ).order_by(
+            func.date(Article.created_at)
+        )
+
+        result = await db.execute(query)
+        trend_data = result.all()
+
+        # 构建完整的日期序列（填充缺失的日期）
+        trend_dict = {str(date): count for date, count in trend_data}
+        full_trend = []
+
+        for i in range(days):
+            current_date = start_date + timedelta(days=i)
+            date_str = current_date.strftime('%Y-%m-%d')
+            full_trend.append({
+                "date": date_str,
+                "count": trend_dict.get(date_str, 0)
+            })
+
+        return {
+            "success": True,
+            "days": days,
+            "trend": full_trend,
+            "total": sum(item["count"] for item in full_trend)
+        }
+    except Exception as e:
+        logger.error(f"获取文章趋势失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取趋势数据失败: {str(e)}")
+
+
+@router.get("/stats/trend")
+async def get_article_trend_chart(days: int = 7, db: AsyncSession = Depends(get_db)):
+    """
+    获取文章发布趋势图表数据
+    
+    Args:
+        days: 统计天数（默认7天）
+        db: 数据库会话
+    
+    Returns:
+        图表数据
+    """
+    try:
+        from datetime import timedelta, datetime as dt
+        from sqlalchemy import func
+
+        # 计算开始日期
+        end_date = dt.utcnow()
+        start_date = end_date - timedelta(days - 1)
+
+        # 获取已发布文章趋势
+        published_query = select(
+            func.date(Article.created_at).label('date'),
+            func.count(Article.id).label('count')
+        ).where(
+            Article.status == ArticleStatus.PUBLISHED,
+            func.date(Article.created_at) >= start_date.date()
+        ).group_by(
+            func.date(Article.created_at)
+        ).order_by(
+            func.date(Article.created_at)
+        )
+
+        # 获取草稿文章趋势
+        draft_query = select(
+            func.date(Article.created_at).label('date'),
+            func.count(Article.id).label('count')
+        ).where(
+            Article.status == ArticleStatus.DRAFT,
+            func.date(Article.created_at) >= start_date.date()
+        ).group_by(
+            func.date(Article.created_at)
+        ).order_by(
+            func.date(Article.created_at)
+        )
+
+        published_result = await db.execute(published_query)
+        published_data = {str(date): count for date, count in published_result.all()}
+
+        draft_result = await db.execute(draft_query)
+        draft_data = {str(date): count for date, count in draft_result.all()}
+
+        # 构建图表数据
+        labels = []
+        published_values = []
+        draft_values = []
+
+        for i in range(days):
+            current_date = start_date + timedelta(days=i)
+            date_str = current_date.strftime('%m/%d')
+            labels.append(date_str)
+            published_values.append(published_data.get(str(current_date.date()), 0))
+            draft_values.append(draft_data.get(str(current_date.date()), 0))
+
+        return {
+            "type": "line",
+            "title": "最近7天发布趋势",
+            "labels": labels,
+            "datasets": [
+                {
+                    "label": "已发布",
+                    "data": published_values,
+                    "borderColor": "#3b82f6",
+                    "backgroundColor": "#3b82f6",
+                    "borderWidth": 2,
+                    "fill": False
+                },
+                {
+                    "label": "草稿",
+                    "data": draft_values,
+                    "borderColor": "#6b7280",
+                    "backgroundColor": "#6b7280",
+                    "borderWidth": 2,
+                    "fill": False
+                }
+            ]
+        }
+    except Exception as e:
+        logger.error(f"获取趋势图表数据失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取趋势图表数据失败: {str(e)}")
+
+
+@router.get("/stats/platform")
+async def get_platform_stats(db: AsyncSession = Depends(get_db)):
+    """
+    获取跨平台统计数据
+    
+    Returns:
+        平台统计数据
+    """
+    try:
+        from sqlalchemy import func
+        from ..models.publish_platform import PublishRecord, PlatformType, PublishStatus
+
+        # 获取各平台的统计数据
+        platform_labels = {
+            PlatformType.WECHAT: "微信公众号",
+            PlatformType.ZHIHU: "知乎",
+            PlatformType.JUEJIN: "掘金",
+            PlatformType.TOUTIAO: "头条"
+        }
+
+        # 构建查询 - 按平台汇总阅读量和点赞数
+        query = select(
+            PublishRecord.platform,
+            func.sum(PublishRecord.view_count).label('total_views'),
+            func.sum(PublishRecord.like_count).label('total_likes'),
+            func.count(PublishRecord.id).label('article_count')
+        ).where(
+            PublishRecord.status == PublishStatus.SUCCESS
+        ).group_by(
+            PublishRecord.platform
+        )
+
+        result = await db.execute(query)
+        platform_data = result.all()
+
+        # 构建图表数据
+        labels = []
+        views_data = []
+        likes_data = []
+        articles_data = []
+
+        # 按固定顺序填充数据
+        for platform_type in [PlatformType.WECHAT, PlatformType.ZHIHU, PlatformType.JUEJIN, PlatformType.TOUTIAO]:
+            labels.append(platform_labels[platform_type])
+            
+            # 查找该平台的数据
+            platform_stats = next(
+                (row for row in platform_data if row.platform == platform_type),
+                None
+            )
+            
+            if platform_stats:
+                views_data.append(platform_stats.total_views or 0)
+                likes_data.append(platform_stats.total_likes or 0)
+                articles_data.append(platform_stats.article_count or 0)
+            else:
+                views_data.append(0)
+                likes_data.append(0)
+                articles_data.append(0)
+
+        return {
+            "type": "bar",
+            "title": "跨平台数据对比",
+            "labels": labels,
+            "datasets": [
+                {
+                    "label": "阅读量",
+                    "data": views_data,
+                    "backgroundColor": "#6366f1",
+                    "borderColor": "#6366f1",
+                    "borderWidth": 0
+                },
+                {
+                    "label": "点赞数",
+                    "data": likes_data,
+                    "backgroundColor": "#ec4899",
+                    "borderColor": "#ec4899",
+                    "borderWidth": 0
+                }
+            ],
+            "summary": {
+                "total_articles": sum(articles_data),
+                "total_views": sum(views_data),
+                "total_likes": sum(likes_data),
+                "platforms_with_articles": sum(1 for count in articles_data if count > 0)
+            }
+        }
+
+    except Exception as e:
+        logger.error(f"获取平台统计数据失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取平台统计数据失败: {str(e)}")
+
+
+@router.get("/stats/category")
+async def get_category_stats(db: AsyncSession = Depends(get_db)):
+    """
+    获取文章分类统计（基于标签）
+    
+    Returns:
+        分类统计数据
+    """
+    try:
+        from sqlalchemy import func
+
+        # 获取所有文章的标签
+        query = select(Article.tags).where(
+            Article.tags.isnot(None),
+            Article.tags != ''
+        )
+        result = await db.execute(query)
+        all_tags_records = result.scalars().all()
+
+        # 统计标签使用次数
+        tag_counts = {}
+        for tags_str in all_tags_records:
+            if tags_str:
+                for tag in tags_str.split(','):
+                    tag = tag.strip()
+                    if tag:
+                        tag_counts[tag] = tag_counts.get(tag, 0) + 1
+
+        # 按使用次数排序，取前8个
+        sorted_tags = sorted(tag_counts.items(), key=lambda x: x[1], reverse=True)[:8]
+
+        # 构建图表数据
+        labels = []
+        values = []
+        colors = ["#6366f1", "#8b5cf6", "#ec4899", "#22c55e", "#3b82f6", "#f59e0b", "#ef4444", "#14b8a6"]
+
+        for tag, count in sorted_tags:
+            labels.append(tag)
+            values.append(count)
+
+        return {
+            "type": "pie",
+            "title": "文章标签分布",
+            "labels": labels,
+            "datasets": [
+                {
+                    "label": "数量",
+                    "data": values,
+                    "backgroundColor": colors[:len(labels)],
+                    "borderColor": colors[:len(labels)],
+                    "borderWidth": 0
+                }
+            ],
+            "summary": {
+                "total_categories": len(labels),
+                "total_articles": sum(values)
+            }
+        }
+
+    except Exception as e:
+        logger.error(f"获取分类统计数据失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取分类统计数据失败: {str(e)}")
