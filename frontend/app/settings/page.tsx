@@ -37,6 +37,7 @@ export default function SettingsPage() {
   const [showSecrets, setShowSecrets] = useState<Record<string, boolean>>({})
 
   const [config, setConfig] = useState({
+    aiProvider: 'openai',
     deepseekApiKey: '',
     deepseekBaseUrl: 'https://api.deepseek.com/v1',
     deepseekModel: 'deepseek-chat',
@@ -44,6 +45,7 @@ export default function SettingsPage() {
     openaiBaseUrl: 'https://api.dev88.tech/v1',
     openaiModel: 'gpt-5-nano',
     geminiApiKey: '',
+    geminiBaseUrl: 'https://generativelanguage.googleapis.com/v1beta',
     geminiModel: 'gemini-pro',
     wechatAppId: '',
     wechatAppSecret: '',
@@ -68,17 +70,57 @@ export default function SettingsPage() {
 
   const loadConfig = async () => {
     try {
-      const response = await fetch(`${API_URL}/api/config`)
-      if (response.ok) {
-        const data = await response.json()
+      const [globalResponse, providersResponse] = await Promise.all([
+        fetch(`${API_URL}/api/config`),
+        fetch(`${API_URL}/api/config/providers`),
+      ])
+
+      if (globalResponse.ok) {
+        const data = await globalResponse.json()
         if (data.config) {
+          setConfig(prev => {
+            const activeProvider = data.config.ai_provider || prev.aiProvider
+            const nextConfig = {
+              ...prev,
+              aiProvider: activeProvider,
+              wechatAppId: data.config.wechat_app_id || '',
+              wechatAppSecret: data.config.wechat_app_secret || '',
+            }
+
+            if (activeProvider === 'deepseek') {
+              nextConfig.deepseekApiKey = data.config.api_key || ''
+              nextConfig.deepseekBaseUrl = data.config.base_url || prev.deepseekBaseUrl
+              nextConfig.deepseekModel = data.config.model || prev.deepseekModel
+            } else if (activeProvider === 'openai') {
+              nextConfig.openaiApiKey = data.config.api_key || ''
+              nextConfig.openaiBaseUrl = data.config.base_url || prev.openaiBaseUrl
+              nextConfig.openaiModel = data.config.model || prev.openaiModel
+            } else if (activeProvider === 'gemini') {
+              nextConfig.geminiApiKey = data.config.api_key || ''
+              nextConfig.geminiBaseUrl = data.config.base_url || prev.geminiBaseUrl
+              nextConfig.geminiModel = data.config.model || prev.geminiModel
+            }
+
+            return nextConfig
+          })
+        }
+      }
+
+      if (providersResponse.ok) {
+        const providerData = await providersResponse.json()
+        if (providerData.success && Array.isArray(providerData.providers)) {
+          const providerMap = Object.fromEntries(
+            providerData.providers.map((item: any) => [item.provider, item])
+          )
+
           setConfig(prev => ({
             ...prev,
-            deepseekApiKey: data.config.api_key || '',
-            deepseekBaseUrl: data.config.base_url || prev.deepseekBaseUrl,
-            deepseekModel: data.config.model || prev.deepseekModel,
-            wechatAppId: data.config.wechat_app_id || '',
-            wechatAppSecret: data.config.wechat_app_secret || '',
+            deepseekBaseUrl: providerMap.deepseek?.base_url || prev.deepseekBaseUrl,
+            deepseekModel: providerMap.deepseek?.model || prev.deepseekModel,
+            openaiBaseUrl: providerMap.openai?.base_url || prev.openaiBaseUrl,
+            openaiModel: providerMap.openai?.model || prev.openaiModel,
+            geminiBaseUrl: providerMap.gemini?.base_url || prev.geminiBaseUrl,
+            geminiModel: providerMap.gemini?.model || prev.geminiModel,
           }))
         }
       }
@@ -243,14 +285,65 @@ export default function SettingsPage() {
   const handleSave = async () => {
     setLoading(true)
     try {
+      const providerPayloads = [
+        {
+          provider: 'deepseek',
+          api_key: config.deepseekApiKey.trim(),
+          base_url: config.deepseekBaseUrl,
+          model: config.deepseekModel,
+        },
+        {
+          provider: 'openai',
+          api_key: config.openaiApiKey.trim(),
+          base_url: config.openaiBaseUrl,
+          model: config.openaiModel,
+        },
+        {
+          provider: 'gemini',
+          api_key: config.geminiApiKey.trim(),
+          base_url: config.geminiBaseUrl,
+          model: config.geminiModel,
+        },
+      ]
+
+      const activeProviderPayload = providerPayloads.find(item => item.provider === config.aiProvider)
+
+      if (!activeProviderPayload?.api_key) {
+        alert('请先填写默认提供商的 API Key')
+        return
+      }
+
+      const providerSaveRequests = providerPayloads
+        .filter(item => item.api_key)
+        .map(item =>
+          fetch(`${API_URL}/api/config/providers`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              provider: item.provider,
+              api_key: item.api_key,
+              base_url: item.base_url,
+              model: item.model,
+              is_enabled: true,
+              is_default: item.provider === config.aiProvider,
+            }),
+          })
+        )
+
+      const providerSaveResponses = await Promise.all(providerSaveRequests)
+      const hasProviderSaveFailed = providerSaveResponses.some(item => !item.ok)
+      if (hasProviderSaveFailed) {
+        throw new Error('保存提供商配置失败')
+      }
+
       const response = await fetch(`${API_URL}/api/config`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ai_provider: config.deepseekApiKey ? 'deepseek' : 'openai',
-          api_key: config.deepseekApiKey || config.openaiApiKey,
-          base_url: config.deepseekApiKey ? config.deepseekBaseUrl : config.openaiBaseUrl,
-          model: config.deepseekApiKey ? config.deepseekModel : config.openaiModel,
+          ai_provider: config.aiProvider,
+          api_key: activeProviderPayload.api_key,
+          base_url: activeProviderPayload.base_url,
+          model: activeProviderPayload.model,
           wechat_app_id: config.wechatAppId,
           wechat_app_secret: config.wechatAppSecret,
         }),
@@ -265,12 +358,13 @@ export default function SettingsPage() {
     }
   }
 
-  const handleTestConnection = async (type: string) => {
+  const handleTestConnection = async (provider: 'deepseek' | 'openai') => {
     setLoading(true)
     try {
-      const apiKey = type === 'DeepSeek' ? config.deepseekApiKey : config.openaiApiKey
+      const providerLabel = provider === 'deepseek' ? 'DeepSeek' : 'OpenAI'
+      const apiKey = provider === 'deepseek' ? config.deepseekApiKey : config.openaiApiKey
       if (!apiKey) {
-        alert(`请先填写 ${type} 的 API Key`)
+        alert(`请先填写 ${providerLabel} 的 API Key`)
         return
       }
       const response = await fetch(`${API_URL}/api/config/test-api`, {
@@ -278,12 +372,12 @@ export default function SettingsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           api_key: apiKey,
-          base_url: type === 'DeepSeek' ? config.deepseekBaseUrl : config.openaiBaseUrl,
-          model: type === 'DeepSeek' ? config.deepseekModel : config.openaiModel,
+          base_url: provider === 'deepseek' ? config.deepseekBaseUrl : config.openaiBaseUrl,
+          model: provider === 'deepseek' ? config.deepseekModel : config.openaiModel,
         }),
       })
       const result = await response.json()
-      alert(result.success ? `${type} 连接成功` : `连接失败：${result.message}`)
+      alert(result.success ? `${providerLabel} 连接成功` : `连接失败：${result.message}`)
     } catch (error) {
       alert('连接测试失败')
     } finally {
@@ -356,6 +450,22 @@ export default function SettingsPage() {
         {/* AI 模型配置 */}
         {activeTab === 'ai' && (
           <div className="space-y-4">
+            <div className="bg-white rounded-2xl border border-slate-200 p-5">
+              <label className="block text-xs text-slate-500 mb-1.5">默认文章生成提供商</label>
+              <select
+                value={config.aiProvider}
+                onChange={(e) => setConfig({ ...config, aiProvider: e.target.value })}
+                className={inputClasses}
+              >
+                <option value="openai">OpenAI（当前推荐）</option>
+                <option value="deepseek">DeepSeek</option>
+                <option value="gemini">Gemini</option>
+              </select>
+              <p className="text-xs text-slate-500 mt-2">
+                保存时会同步写入各提供商配置；默认提供商用于文章生成的主链路。
+              </p>
+            </div>
+
             {/* DeepSeek */}
             <div className="bg-white rounded-2xl border border-slate-200 p-5">
               <div className="flex items-center justify-between mb-4">
@@ -369,7 +479,7 @@ export default function SettingsPage() {
                   </div>
                 </div>
                 <button
-                  onClick={() => handleTestConnection('DeepSeek')}
+                  onClick={() => handleTestConnection('deepseek')}
                   disabled={loading}
                   className="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-600 text-xs font-medium hover:bg-slate-200"
                 >
@@ -421,7 +531,7 @@ export default function SettingsPage() {
                     <p className="text-xs text-slate-500">GPT-4 系列</p>
                   </div>
                 </div>
-                <button onClick={() => handleTestConnection('OpenAI')} disabled={loading} className="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-600 text-xs font-medium hover:bg-slate-200">
+                <button onClick={() => handleTestConnection('openai')} disabled={loading} className="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-600 text-xs font-medium hover:bg-slate-200">
                   测试连接
                 </button>
               </div>
@@ -444,6 +554,10 @@ export default function SettingsPage() {
                     <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
                     <option value="gpt-4-turbo-preview">GPT-4 Turbo</option>
                   </select>
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-xs text-slate-500 mb-1.5">Base URL</label>
+                  <input type="text" value={config.openaiBaseUrl} onChange={(e) => setConfig({ ...config, openaiBaseUrl: e.target.value })} className={inputClasses} />
                 </div>
               </div>
             </div>
