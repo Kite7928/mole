@@ -214,22 +214,32 @@ score为标题质量评分（0-100）。"""
         import traceback
         logger.error(f"生成大纲失败: {str(e)}")
         logger.error(f"错误详情: {traceback.format_exc()}")
-        
-        # 降级方案：返回模拟大纲
-        logger.warning("使用模拟大纲数据")
-        return GenerateOutlineResponse(
-            titles=[
-                {"title": f"深度解析：{request.topic}的核心价值", "score": 85},
-                {"title": f"90%的人都不知道的{request.topic}真相", "score": 88},
-            ],
-            outline=[
-                OutlineSection(title="引言", content=f"引入{request.topic}的重要性和背景", word_count=200),
-                OutlineSection(title="核心要点", content=f"分析{request.topic}的关键特征", word_count=400),
-                OutlineSection(title="实际应用", content=f"{request.topic}的应用场景和案例", word_count=300),
-                OutlineSection(title="总结", content="总结全文并提出行动建议", word_count=150),
-            ],
-            total_word_count=1050,
-            estimated_time="3分钟"
+
+        if settings.ALLOW_MOCK_FALLBACK or settings.DEBUG:
+            logger.warning("AI 大纲生成失败，已启用模拟大纲降级")
+            return GenerateOutlineResponse(
+                titles=[
+                    {"title": f"深度解析：{request.topic}的核心价值", "score": 85},
+                    {"title": f"90%的人都不知道的{request.topic}真相", "score": 88},
+                ],
+                outline=[
+                    OutlineSection(title="引言", content=f"引入{request.topic}的重要性和背景", word_count=200),
+                    OutlineSection(title="核心要点", content=f"分析{request.topic}的关键特征", word_count=400),
+                    OutlineSection(title="实际应用", content=f"{request.topic}的应用场景和案例", word_count=300),
+                    OutlineSection(title="总结", content="总结全文并提出行动建议", word_count=150),
+                ],
+                total_word_count=1050,
+                estimated_time="3分钟"
+            )
+
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "message": "AI 大纲生成失败，请检查模型配置或稍后重试",
+                "error_type": "ai_generate_outline_failed",
+                "allow_mock_fallback": False,
+                "debug_error": str(e) if settings.DEBUG else None,
+            }
         )
 
 
@@ -311,10 +321,10 @@ async def expand_section(request: ExpandSectionRequest, db: AsyncSession = Depen
         import traceback
         logger.error(f"扩写段落失败: {str(e)}")
         logger.error(f"错误详情: {traceback.format_exc()}")
-        
-        # 降级方案：返回模拟内容
-        logger.warning("使用模拟扩写内容")
-        mock_content = f"""关于{request.outline_point}，这是一个值得深入探讨的话题。
+
+        if settings.ALLOW_MOCK_FALLBACK or settings.DEBUG:
+            logger.warning("AI 扩写失败，已启用模拟扩写降级")
+            mock_content = f"""关于{request.outline_point}，这是一个值得深入探讨的话题。
 
 首先，我们需要理解其核心价值。在实际应用中，这一点尤为明显。无论是从理论层面还是实践角度，都体现了其重要性。
 
@@ -326,11 +336,21 @@ async def expand_section(request: ExpandSectionRequest, db: AsyncSession = Depen
 通过这样的方法，我们能够更好地理解和运用这一知识，从而在实际工作中取得更好的效果。
 
 > 关键词：{request.outline_point[:10]}"""
-        
-        return ExpandSectionResponse(
-            content=mock_content,
-            word_count=len(mock_content),
-            keywords=[request.outline_point[:10], "应用", "方法"]
+
+            return ExpandSectionResponse(
+                content=mock_content,
+                word_count=len(mock_content),
+                keywords=[request.outline_point[:10], "应用", "方法"]
+            )
+
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "message": "AI 扩写失败，请检查模型配置或稍后重试",
+                "error_type": "ai_expand_section_failed",
+                "allow_mock_fallback": False,
+                "debug_error": str(e) if settings.DEBUG else None,
+            }
         )
 
 

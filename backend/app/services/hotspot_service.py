@@ -7,6 +7,8 @@
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 from enum import Enum
+import asyncio
+from functools import partial
 import httpx
 from bs4 import BeautifulSoup
 import feedparser
@@ -47,6 +49,32 @@ class HotspotService:
         self.http_client = httpx.AsyncClient(timeout=30.0)
         self.cache = {}
         self.cache_duration = 3600  # 缓存1小时
+        # 用于执行同步 RSS 解析的线程池
+        self._executor = None
+
+    def _get_executor(self):
+        """懒加载线程池"""
+        if self._executor is None:
+            from concurrent.futures import ThreadPoolExecutor
+            self._executor = ThreadPoolExecutor(max_workers=3)
+        return self._executor
+
+    async def _parse_feed_with_timeout(self, url: str, timeout: float = 5.0):
+        """使用线程池和超时解析 RSS Feed"""
+        loop = asyncio.get_event_loop()
+        try:
+            # 在线程池中执行同步的 feedparser.parse
+            parse_func = partial(feedparser.parse, url)
+            return await asyncio.wait_for(
+                loop.run_in_executor(self._get_executor(), parse_func),
+                timeout=timeout
+            )
+        except asyncio.TimeoutError:
+            logger.warning(f"RSS 解析超时: {url}")
+            return None
+        except Exception as e:
+            logger.warning(f"RSS 解析失败: {url} - {str(e)}")
+            return None
 
     async def fetch_weibo_hotspots(self, count: int = 20) -> List[Dict[str, Any]]:
         """
@@ -220,7 +248,9 @@ class HotspotService:
             # RSSHub 公共实例
             url = "https://rsshub.app/weibo/search/hot"
 
-            feed = feedparser.parse(url)
+            feed = await self._parse_feed_with_timeout(url, timeout=5.0)
+            if feed is None:
+                return []
             hotspots = []
 
             for i, entry in enumerate(feed.entries[:count]):
@@ -266,7 +296,9 @@ class HotspotService:
             # RSSHub 公共实例
             url = "https://rsshub.app/zhihu/hot-list"
 
-            feed = feedparser.parse(url)
+            feed = await self._parse_feed_with_timeout(url, timeout=5.0)
+            if feed is None:
+                return []
             hotspots = []
 
             for i, entry in enumerate(feed.entries[:count]):
@@ -311,7 +343,9 @@ class HotspotService:
             # RSSHub 公共实例
             url = "https://rsshub.app/bilibili/popular"
 
-            feed = feedparser.parse(url)
+            feed = await self._parse_feed_with_timeout(url, timeout=5.0)
+            if feed is None:
+                return []
             hotspots = []
 
             for i, entry in enumerate(feed.entries[:count]):
@@ -356,7 +390,9 @@ class HotspotService:
             # 使用 RSSHub 获取 36氪 最新文章
             url = "https://rsshub.app/36kr/latest"
 
-            feed = feedparser.parse(url)
+            feed = await self._parse_feed_with_timeout(url, timeout=5.0)
+            if feed is None:
+                return []
             hotspots = []
 
             for i, entry in enumerate(feed.entries[:count]):
@@ -400,7 +436,9 @@ class HotspotService:
             # 使用 RSSHub 获取少数派最新文章
             url = "https://rsshub.app/sspai/latest"
 
-            feed = feedparser.parse(url)
+            feed = await self._parse_feed_with_timeout(url, timeout=5.0)
+            if feed is None:
+                return []
             hotspots = []
 
             for i, entry in enumerate(feed.entries[:count]):
@@ -456,27 +494,45 @@ class HotspotService:
 
         results = {}
 
-        # 并发获取各来源话题
+        # 并发获取各来源话题，使用 gather 和 return_exceptions 确保部分失败不影响整体
         tasks = []
+        source_names = []
         for source in sources:
             if source == HotspotSource.WEIBO:
-                tasks.append(("weibo", self.fetch_weibo_hotspots_rsshub(count)))
+                tasks.append(self.fetch_weibo_hotspots_rsshub(count))
+                source_names.append("weibo")
             elif source == HotspotSource.ZHIHU:
-                tasks.append(("zhihu", self.fetch_zhihu_hotspots_rsshub(count)))
+                tasks.append(self.fetch_zhihu_hotspots_rsshub(count))
+                source_names.append("zhihu")
             elif source == HotspotSource.BILIBILI:
-                tasks.append(("bilibili", self.fetch_bilibili_hotspots_rsshub(count)))
+                tasks.append(self.fetch_bilibili_hotspots_rsshub(count))
+                source_names.append("bilibili")
             elif source == HotspotSource.KR36:
-                tasks.append(("kr36", self.fetch_kr36_hotspots(count)))
+                tasks.append(self.fetch_kr36_hotspots(count))
+                source_names.append("kr36")
             elif source == HotspotSource.SSPAI:
-                tasks.append(("sspai", self.fetch_sspai_hotspots(count)))
+                tasks.append(self.fetch_sspai_hotspots(count))
+                source_names.append("sspai")
 
-        for source_name, task in tasks:
-            try:
-                hotspots = await task
-                results[source_name] = hotspots
-            except Exception as e:
-                logger.error(f"获取 {source_name} 话题失败: {str(e)}")
-                results[source_name] = []
+        # 使用 gather 并行执行，设置总超时 15 秒
+        try:
+            completed_tasks = await asyncio.wait_for(
+                asyncio.gather(*tasks, return_exceptions=True),
+                timeout=15.0
+            )
+            
+            for source_name, result in zip(source_names, completed_tasks):
+                if isinstance(result, Exception):
+                    logger.error(f"获取 {source_name} 话题失败: {str(result)}")
+                    results[source_name] = []
+                else:
+                    results[source_name] = result
+        except asyncio.TimeoutError:
+            logger.warning("获取热点数据总超时，返回已有结果")
+            # 为未完成的数据源填充空结果
+            for source_name in source_names:
+                if source_name not in results:
+                    results[source_name] = []
 
         # 更新缓存
         self._update_cache(results)

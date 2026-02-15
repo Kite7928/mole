@@ -12,7 +12,7 @@ from .core.config import settings
 from .core.logger import logger
 from .core.database import init_db, close_db
 from .models import *  # 导入所有模型以注册到 Base.metadata
-from .api import articles, news, unified_ai, wechat, config, health, hotspots, templates, charts, creator, ai_streaming, publish, multiplatform, unified_ai_advanced, preview
+from .api import articles, news, unified_ai, wechat, config, health, hotspots, templates, charts, creator, ai_streaming, publish, multiplatform, unified_ai_advanced, preview, rss_sources, search, image_providers, article_images, analytics, content_strategy, ai_enhance, publish_queue, observability
 from .api.unified_ai import providers_alias_router
 from .services.unified_ai_service import (
     unified_ai_service,
@@ -22,6 +22,7 @@ from .services.unified_ai_service import (
 from .services.memory_cache import initialize_caches, close_caches
 from .services.async_task_queue import initialize_task_queue, close_task_queue
 from .services.stats_sync_service import initialize_stats_sync, close_stats_sync
+from .services.image_provider_manager import image_provider_manager
 
 
 class CustomJSONResponse(JSONResponse):
@@ -62,6 +63,16 @@ async def lifespan(app: FastAPI):
     # 初始化统计同步服务（1小时同步一次）
     await initialize_stats_sync()
     logger.info("统计同步服务初始化完成")
+
+    # 初始化图片提供商默认配置
+    try:
+        from .core.database import async_session_maker
+        async with async_session_maker() as session:
+            default_configs = await image_provider_manager.initialize_default_configs(session)
+            if default_configs:
+                logger.info(f"已初始化默认图片提供商配置: {[c['name'] for c in default_configs]}")
+    except Exception as e:
+        logger.warning(f"初始化默认图片提供商配置失败: {e}")
 
     yield
 
@@ -171,6 +182,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 # 注册路由
 app.include_router(health.router, prefix="/api/health", tags=["健康检查"])
 app.include_router(articles.router, prefix="/api/articles", tags=["文章管理"])
+app.include_router(article_images.router, prefix="/api/articles/{article_id}/images", tags=["文章配图"])
 app.include_router(news.router, prefix="/api/news", tags=["新闻热点"])
 app.include_router(wechat.router, prefix="/api/wechat", tags=["微信集成"])
 app.include_router(unified_ai.router, prefix="/api/ai", tags=["AI服务"])
@@ -185,6 +197,14 @@ app.include_router(creator.router, prefix="/api/creator", tags=["自媒体工具
 app.include_router(publish.router, prefix="/api/publish", tags=["多平台发布"])
 app.include_router(multiplatform.router, prefix="/api/multiplatform", tags=["多平台发布-Mixpost"])
 app.include_router(preview.router, prefix="/api/preview", tags=["文章预览"])
+app.include_router(rss_sources.router, prefix="/api/rss-sources", tags=["RSS源管理"])
+app.include_router(search.router, prefix="/api/search", tags=["全文搜索"])
+app.include_router(image_providers.router, prefix="/api/image-providers", tags=["图片生成配置"])
+app.include_router(analytics.router, prefix="/api/analytics", tags=["数据分析"])
+app.include_router(content_strategy.router, prefix="/api/content-strategy", tags=["内容策略"])
+app.include_router(ai_enhance.router, prefix="/api/ai-enhance", tags=["AI增强"])
+app.include_router(publish_queue.router, prefix="/api/publish-queue", tags=["发布队列"])
+app.include_router(observability.router, prefix="/api/observability", tags=["可观测性"])
 
 # 挂载静态文件服务（用于提供上传的图片）
 uploads_dir = Path(settings.UPLOAD_DIR)

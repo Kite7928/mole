@@ -8,8 +8,16 @@ from .task import Task, TaskType, TaskStatus
 from .batch_job import BatchJob, BatchJobType, BatchJobStatus
 from .ai_provider_config import AIProviderConfig, DEFAULT_AI_PROVIDERS
 from .publish_platform import (
-    PlatformType, PlatformConfig, PublishRecord, 
+    PlatformType, PlatformConfig, PublishRecord,
     PublishTask, PublishStatus, PLATFORM_INFO
+)
+from .rss_source import RssSource
+from .image_provider_config import ImageProviderConfig
+from .content_strategy import (
+    PublishSchedule, ScheduleStatus, PublishPlatform,
+    ArticleSeries, SeriesStatus,
+    TopicIdea, IdeaStatus, IdeaPriority,
+    ContentCalendarEvent
 )
 
 __all__ = [
@@ -35,4 +43,16 @@ __all__ = [
     "PublishTask",
     "PublishStatus",
     "PLATFORM_INFO",
+    "RssSource",
+    "ImageProviderConfig",
+    # 内容策略模型
+    "PublishSchedule",
+    "ScheduleStatus",
+    "PublishPlatform",
+    "ArticleSeries",
+    "SeriesStatus",
+    "TopicIdea",
+    "IdeaStatus",
+    "IdeaPriority",
+    "ContentCalendarEvent",
 ]

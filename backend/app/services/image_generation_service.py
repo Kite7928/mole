@@ -8,6 +8,7 @@ import hashlib
 from ..core.config import settings
 from ..core.logger import logger
 from .cache import ai_response_cache
+from .image_provider_manager import image_provider_manager
 
 
 class ImageGenerationService:
@@ -337,7 +338,37 @@ class ImageGenerationService:
         Returns:
             生成的封面图
         """
-        results = await self.generate_batch_article_covers(topic, style, provider, n=1)
+        # 首先尝试使用新的图片提供商管理器
+        try:
+            from ..core.database import async_session_maker
+            from pathlib import Path
+            async with async_session_maker() as db:
+                cover_path = await image_provider_manager.generate_cover(
+                    db=db,
+                    title=topic,
+                    width=900,
+                    height=500,
+                    style=style
+                )
+                if cover_path:
+                    logger.info(f"使用新图片提供商生成封面图成功: {cover_path}")
+                    # 将本地路径转换为可访问的 URL
+                    # 统一使用正斜杠，并只保留文件名
+                    cover_path = cover_path.replace('\\', '/')
+                    filename = cover_path.split('/')[-1]
+                    # 返回 uploads 目录下的相对路径
+                    url_path = f"uploads/{filename}"
+                    return {
+                        "url": url_path,
+                        "prompt": topic,
+                        "provider": "image_provider_manager"
+                    }
+        except Exception as e:
+            logger.warning(f"新图片提供商生成失败，回退到旧方法: {e}")
+
+        # image_provider_manager 失败，使用 mock 图片
+        logger.warning("图片提供商生成失败，使用 mock 图片")
+        results = await self._get_mock_images(topic, 1)
         return results[0] if results else None
 
     async def generate_batch_article_covers(
@@ -671,15 +702,31 @@ class ImageGenerationService:
                     r = random.randint(5, 20)
                     draw.ellipse([x-r, y-r, x+r, y+r], fill=accent_color)
                 
-                # 添加标题
-                try:
-                    font = ImageFont.truetype('arial.ttf', 50)
-                except:
+                # 添加标题 - 尝试使用支持中文的字体
+                font = None
+                font_paths = [
+                    'C:/Windows/Fonts/simhei.ttf',  # 黑体
+                    'C:/Windows/Fonts/simsun.ttc',  # 宋体
+                    'C:/Windows/Fonts/msyh.ttc',    # 微软雅黑
+                    'C:/Windows/Fonts/arial.ttf',   # Arial
+                ]
+                for font_path in font_paths:
+                    try:
+                        font = ImageFont.truetype(font_path, 50)
+                        break
+                    except:
+                        continue
+                if not font:
                     font = ImageFont.load_default()
                 
-                # 提取关键词作为标题
-                words = prompt.split()[:3]
-                title = ' '.join(words) if words else 'Article'
+                # 从提示词中提取文章标题（在单引号之间的中文内容）
+                import re
+                match = re.search(r"about '([^']+)'", prompt)
+                if match:
+                    title = match.group(1)
+                else:
+                    # 降级方案：提取前20个字符
+                    title = prompt[:30] if len(prompt) > 30 else prompt
                 
                 bbox = draw.textbbox((0, 0), title, font=font)
                 text_width = bbox[2] - bbox[0]
@@ -690,13 +737,18 @@ class ImageGenerationService:
                 
                 draw.text((x, y), title, fill=text_color, font=font)
                 
-                # 添加副标题
-                try:
-                    font_small = ImageFont.truetype('arial.ttf', 24)
-                except:
+                # 添加副标题 - 使用相同字体但更小字号
+                font_small = None
+                for font_path in font_paths:
+                    try:
+                        font_small = ImageFont.truetype(font_path, 24)
+                        break
+                    except:
+                        continue
+                if not font_small:
                     font_small = ImageFont.load_default()
                 
-                subtitle = 'AI Generated Article'
+                subtitle = 'AI 智能生成'
                 bbox_small = draw.textbbox((0, 0), subtitle, font=font_small)
                 text_width_small = bbox_small[2] - bbox_small[0]
                 
@@ -715,7 +767,7 @@ class ImageGenerationService:
                 img.save(file_path, 'JPEG', quality=95)
                 
                 mock_images.append({
-                    'url': str(file_path),
+                    'url': f'uploads/{filename}',
                     'prompt': prompt,
                     'provider': 'local',
                     'size': '900x500'

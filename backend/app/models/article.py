@@ -1,7 +1,9 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, Enum, Float, Boolean, Index
+from sqlalchemy import Column, Integer, String, Text, DateTime, Enum, Float, Boolean, Index, ForeignKey
 from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
 from ..core.database import Base
 import enum
+import json
 
 
 class ArticleStatus(str, enum.Enum):
@@ -43,6 +45,11 @@ class Article(Base):
     # 质量评分
     quality_score = Column(Float, nullable=True)           # 0-100分
 
+    # 质检元数据
+    quality_check_status = Column(String(20), default="unchecked", index=True)  # unchecked/pass/warning/blocked
+    quality_check_data = Column(Text, nullable=True)  # JSON 字符串
+    quality_checked_at = Column(DateTime, nullable=True)
+
     # 标签系统 - 以逗号分隔的标签字符串
     tags = Column(String(1000), nullable=True, index=True)
 
@@ -73,6 +80,30 @@ class Article(Base):
     def set_tags_list(self, tags: list):
         """设置标签列表"""
         self.tags = ','.join(tags) if tags else None
+
+    def get_quality_check_data(self) -> dict:
+        """获取质检详情"""
+        if not self.quality_check_data:
+            return {}
+        try:
+            return json.loads(self.quality_check_data)
+        except Exception:
+            return {}
+
+    def set_quality_check_data(self, data: dict | None):
+        """设置质检详情"""
+        if not data:
+            self.quality_check_data = None
+            return
+        self.quality_check_data = json.dumps(data, ensure_ascii=False)
+
+    # 关联关系
+    schedules = relationship("PublishSchedule", back_populates="article", cascade="all, delete-orphan")
+    
+    # 系列文章关联
+    series_id = Column(Integer, ForeignKey("article_series.id"), nullable=True)
+    series = relationship("ArticleSeries", back_populates="articles")
+    series_order = Column(Integer, default=0)  # 在系列中的排序
 
     def __repr__(self):
         return f"<Article(id={self.id}, title='{self.title}', status='{self.status}')>"

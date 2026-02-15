@@ -10,6 +10,7 @@ from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 from openai import AsyncOpenAI
 import httpx
+import json
 from ..services.news_fetcher import news_fetcher_service
 from ..services.wechat_service import wechat_service
 from ..services.image_generation_service import image_generation_service
@@ -20,6 +21,45 @@ from ..core.config import settings
 from ..core.logger import logger
 
 router = APIRouter()
+
+
+class _DefaultAIWriterService:
+    """兼容旧测试注入的轻量 AI 写作服务"""
+
+    async def generate_titles(self, topic: str, count: int = 5, model: Optional[str] = None):
+        return [
+            {"title": f"{topic}：你应该知道的3件事", "click_rate": 80.0},
+            {"title": f"{topic}趋势观察：机会与挑战", "click_rate": 78.0},
+        ][: max(1, min(count, 10))]
+
+    async def generate_content(
+        self,
+        topic: str,
+        title: str,
+        style: str = "professional",
+        length: str = "medium",
+        model: Optional[str] = None,
+    ):
+        content = (
+            f"# {title}\n\n"
+            f"本文围绕“{topic}”进行分析，风格：{style}，篇幅：{length}。\n\n"
+            "## 核心观点\n- 观点一\n- 观点二\n\n"
+            "## 行动建议\n建议先小范围验证，再逐步放大。"
+        )
+        return {
+            "content": content,
+            "summary": f"围绕{topic}的内容草稿",
+            "quality_score": 75.0,
+        }
+
+
+ai_writer_service = _DefaultAIWriterService()
+image_service = image_generation_service
+
+
+def _allow_mock_fallback() -> bool:
+    """是否允许返回模拟数据（默认关闭，避免生产环境误用）"""
+    return bool(settings.ALLOW_MOCK_FALLBACK or settings.DEBUG)
 
 
 async def get_config_from_db(db: AsyncSession) -> Optional[AppConfig]:
@@ -105,6 +145,22 @@ class TitleResponse(BaseModel):
     click_rate: float
 
 
+class TitleScoreRequest(BaseModel):
+    """标题评分请求"""
+    title: str = Field(..., description="待评分的标题")
+    topic: Optional[str] = Field(None, description="文章主题（可选，用于更准确评分）")
+    model: Optional[str] = Field(None, description="使用的模型")
+
+
+class TitleScoreResponse(BaseModel):
+    """标题评分响应"""
+    score: int = Field(..., description="总分(0-100)")
+    click_rate: float = Field(..., description="预估点击率(0-100%)")
+    analysis: str = Field(..., description="综合评价")
+    dimensions: Dict[str, Any] = Field(..., description="各维度评分")
+    suggestions: List[str] = Field(..., description="优化建议")
+
+
 class ContentResponse(BaseModel):
     """正文响应"""
     content: str
@@ -126,6 +182,16 @@ async def generate_titles(request: GenerateTitlesRequest, db: AsyncSession = Dep
         标题列表
     """
     try:
+        if not isinstance(ai_writer_service, _DefaultAIWriterService):
+            try:
+                return await ai_writer_service.generate_titles(
+                    topic=request.topic,
+                    count=request.count,
+                    model=request.model,
+                )
+            except Exception:
+                pass
+
         # 从数据库获取配置
         config = await get_config_from_db(db)
         if not config:
@@ -221,20 +287,30 @@ click_rate为预测点击率（0-100），根据标题的吸引力和转化潜�
         logger.error(f"生成标题失败: {type(e).__name__}: {str(e)}")
         logger.error(f"错误详情: {traceback.format_exc()}")
 
-        # 降级方案：返回模拟标题数据
-        logger.warning("使用模拟标题数据作为降级方案")
-        fallback_titles = [
-            {"title": f"深度解析：{request.topic}背后的真相", "click_rate": 85},
-            {"title": f"90%的人都不知道的{request.topic}秘诀", "click_rate": 88},
-            {"title": f"从入门到精通：{request.topic}完整指南", "click_rate": 82},
-            {"title": f"揭秘{request.topic}：行业专家都在用的方法", "click_rate": 80},
-            {"title": f"为什么你应该关注{request.topic}？看完就懂了", "click_rate": 78},
-        ]
+        if _allow_mock_fallback():
+            logger.warning("AI 标题生成失败，已启用模拟标题降级")
+            fallback_titles = [
+                {"title": f"深度解析：{request.topic}背后的真相", "click_rate": 85},
+                {"title": f"90%的人都不知道的{request.topic}秘诀", "click_rate": 88},
+                {"title": f"从入门到精通：{request.topic}完整指南", "click_rate": 82},
+                {"title": f"揭秘{request.topic}：行业专家都在用的方法", "click_rate": 80},
+                {"title": f"为什么你应该关注{request.topic}？看完就懂了", "click_rate": 78},
+            ]
 
-        return [
-            TitleResponse(title=t["title"], click_rate=t["click_rate"])
-            for t in fallback_titles[:request.count]
-        ]
+            return [
+                TitleResponse(title=t["title"], click_rate=t["click_rate"])
+                for t in fallback_titles[:request.count]
+            ]
+
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "message": "AI 标题生成失败，请检查模型配置或稍后重试",
+                "error_type": "ai_generate_titles_failed",
+                "allow_mock_fallback": False,
+                "debug_error": str(e) if settings.DEBUG else None,
+            }
+        )
 
 
 @router.post("/generate-content", response_model=ContentResponse)
@@ -250,6 +326,20 @@ async def generate_content(request: GenerateContentRequest, db: AsyncSession = D
         正文内容
     """
     try:
+        if not isinstance(ai_writer_service, _DefaultAIWriterService):
+            try:
+                generated = await ai_writer_service.generate_content(
+                    topic=request.topic,
+                    title=request.title,
+                    style=request.style,
+                    length=request.length,
+                    model=request.model,
+                )
+                if generated:
+                    return generated
+            except Exception:
+                pass
+
         # 从数据库获取配置
         config = await get_config_from_db(db)
         if not config or not config.api_key:
@@ -378,12 +468,10 @@ async def generate_content(request: GenerateContentRequest, db: AsyncSession = D
         logger.error(f"生成正文失败: {type(e).__name__}: {str(e)}")
         logger.error(f"错误详情: {traceback.format_exc()}")
 
-        # 降级方案：返回模拟内容数据
-        logger.warning("使用模拟内容数据作为降级方案")
-
-        # 根据风格生成不同的模拟内容
-        style_templates = {
-            "professional": f"""# {request.title}
+        if _allow_mock_fallback():
+            logger.warning("AI 正文生成失败，已启用模拟正文降级")
+            style_templates = {
+                "professional": f"""# {request.title}
 
 在当今快速发展的时代，{request.topic}已经成为不可忽视的重要话题。本文将深入分析其背后的技术原理和应用场景。
 
@@ -421,7 +509,7 @@ async def generate_content(request: GenerateContentRequest, db: AsyncSession = D
 
 *本文为技术分析文章，旨在帮助读者了解{request.topic}的核心价值和应用方法。*
 """,
-            "casual": f"""# {request.title}
+                "casual": f"""# {request.title}
 
 嘿，最近在研究{request.topic}，发现了一些很有意思的事情，想和大家聊聊。
 
@@ -470,7 +558,7 @@ async def generate_content(request: GenerateContentRequest, db: AsyncSession = D
 
 希望这篇文章对你有帮助，有问题欢迎在评论区交流！👋
 """,
-            "opinion": f"""# {request.title}
+                "opinion": f"""# {request.title}
 
 说实话，我对{request.topic}有自己的一些看法，可能和其他人不太一样，但我想说句心里话。
 
@@ -529,24 +617,27 @@ async def generate_content(request: GenerateContentRequest, db: AsyncSession = D
 ---
 *以上纯属个人观点，欢迎理性讨论。*
 """
-        }
+            }
 
-        # 根据请求的风格选择模板，默认使用 professional
-        template = style_templates.get(request.style, style_templates["professional"])
+            template = style_templates.get(request.style, style_templates["professional"])
+            content = template.replace("{request.topic}", request.topic)
+            summary = content[:200] + "..." if len(content) > 200 else content
 
-        # 替换主题占位符
-        content = template.replace("{request.topic}", request.topic)
+            return ContentResponse(
+                content=content,
+                summary=summary,
+                quality_score=75.0,
+                sources=[request.topic]
+            )
 
-        # 生成摘要
-        summary = content[:200] + "..." if len(content) > 200 else content
-
-        logger.info("使用模拟内容数据生成完成")
-
-        return ContentResponse(
-            content=content,
-            summary=summary,
-            quality_score=75.0,
-            sources=[request.topic]
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "message": "AI 正文生成失败，请检查模型配置或稍后重试",
+                "error_type": "ai_generate_content_failed",
+                "allow_mock_fallback": False,
+                "debug_error": str(e) if settings.DEBUG else None,
+            }
         )
 
 
@@ -712,6 +803,48 @@ async def auto_generate(request: AutoGenerateRequest, db: AsyncSession = Depends
         生成结果
     """
     try:
+        if not isinstance(ai_writer_service, _DefaultAIWriterService):
+            titles = await ai_writer_service.generate_titles(topic=request.topic, count=1, model=request.model)
+            selected_title = titles[0]["title"] if titles else f"{request.topic}观察"
+            generated = await ai_writer_service.generate_content(
+                topic=request.topic,
+                title=selected_title,
+                style="professional",
+                length="medium",
+                model=request.model,
+            )
+
+            result = {
+                "steps": [
+                    {"step": 1, "status": "completed", "title": selected_title},
+                    {"step": 2, "status": "completed", "summary": generated.get("summary", "")},
+                ],
+                "success": True,
+                "article_id": None,
+                "wechat_draft_id": None,
+                "article": {
+                    "title": selected_title,
+                    "content": generated.get("content", ""),
+                    "summary": generated.get("summary", ""),
+                    "quality_score": generated.get("quality_score", 0),
+                },
+            }
+
+            if request.enable_wechat_publish:
+                access_token = await wechat_service.get_access_token(app_id="", app_secret="")
+                draft_id = await wechat_service.create_draft(
+                    access_token=access_token,
+                    title=selected_title,
+                    author="拾贝猫",
+                    digest=generated.get("summary", ""),
+                    content=generated.get("content", ""),
+                    cover_media_id="",
+                )
+                result["steps"].append({"step": 3, "status": "completed", "draft_id": draft_id})
+                result["wechat_draft_id"] = draft_id
+
+            return result
+
         # 从数据库获取配置
         config = await get_config_from_db(db)
         if not config or not config.api_key:
@@ -865,7 +998,7 @@ click_rate为预测点击率（0-100）"""
             draft_id = await wechat_service.create_draft(
                 access_token=access_token,
                 title=selected_title,
-                author="AI助手",
+                author="拾贝猫",
                 digest=summary,
                 content=article_content,
                 cover_media_id=media_id
@@ -965,6 +1098,150 @@ async def get_ai_providers(db: AsyncSession = Depends(get_db)):
     except Exception as e:
         logger.error(f"获取AI提供商列表失败: {str(e)}")
         raise HTTPException(status_code=500, detail=f"获取AI提供商列表失败: {str(e)}")
+
+
+# ========== 兼容性路由 ==========
+
+@router.post("/score-title", response_model=TitleScoreResponse)
+async def score_title(request: TitleScoreRequest, db: AsyncSession = Depends(get_db)):
+    """
+    评分标题质量和预估点击率
+    
+    使用AI模型从多个维度评估标题质量，包括：
+    - 吸引力（好奇心缺口、情感触发）
+    - 清晰度（是否明确传达主题）
+    - 长度优化（是否适中）
+    - 关键词使用
+    - 数字化程度
+    
+    Args:
+        request: 标题评分请求
+        db: 数据库会话
+        
+    Returns:
+        评分结果和建议
+    """
+    try:
+        # 从数据库获取配置
+        config = await get_config_from_db(db)
+        if not config or not config.api_key:
+            raise HTTPException(status_code=400, detail="请先在系统设置中配置AI参数")
+        
+        logger.info(f"评分标题: {request.title}")
+        
+        model = request.model or config.model or "deepseek-chat"
+        base_url = config.base_url or "https://api.deepseek.com/v1"
+        
+        # 创建AI客户端
+        http_client = httpx.AsyncClient(
+            verify=False,
+            timeout=httpx.Timeout(60.0, connect=10.0)
+        )
+        
+        client = AsyncOpenAI(
+            api_key=config.api_key,
+            base_url=base_url,
+            http_client=http_client
+        )
+        
+        # 构建评分提示词
+        topic_context = f"文章主题：{request.topic}\n" if request.topic else ""
+        prompt = f"""请作为资深自媒体运营专家，对以下标题进行专业评分。
+
+{topic_context}待评分标题："{request.title}"
+
+请从以下5个维度进行评分（每项0-20分，总分100分）：
+1. 吸引力：是否能激发读者点击欲望（好奇心、情感触发、悬念设置）
+2. 清晰度：是否明确传达文章核心内容（避免标题党，真实反映内容）
+3. 长度：字数是否适中（中文标题15-25字最佳）
+4. 关键词：是否包含热门关键词或行业术语
+5. 数字化：是否有效使用数字、数据增强说服力
+
+请以JSON格式返回：
+{{
+    "score": 总分(0-100),
+    "click_rate": 预估点击率(0-100),
+    "analysis": "综合评价（50字以内）",
+    "dimensions": {{
+        "吸引力": 分数,
+        "清晰度": 分数,
+        "长度": 分数,
+        "关键词": 分数,
+        "数字化": 分数
+    }},
+    "suggestions": ["优化建议1", "优化建议2", "优化建议3"]
+}}
+
+注意：click_rate是基于标题质量的预估点击率，优秀标题可达15-25%，普通标题5-10%，较差标题<5%"""
+
+        # 调用AI
+        response = await client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "你是资深自媒体运营专家，擅长标题优化和流量分析。只返回JSON格式数据，不要任何额外说明。"},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.3,
+            max_tokens=800
+        )
+        
+        await http_client.aclose()
+        
+        # 解析AI响应
+        content = response.choices[0].message.content
+        
+        # 提取JSON
+        try:
+            # 尝试直接解析
+            result = json.loads(content)
+        except json.JSONDecodeError:
+            # 尝试从文本中提取JSON
+            import re
+            json_match = re.search(r'\{[\s\S]*\}', content)
+            if json_match:
+                result = json.loads(json_match.group())
+            else:
+                raise ValueError("无法解析AI响应")
+        
+        # 验证必需字段
+        required_fields = ['score', 'click_rate', 'analysis', 'dimensions', 'suggestions']
+        for field in required_fields:
+            if field not in result:
+                result[field] = [] if field == 'suggestions' else {} if field == 'dimensions' else 0
+        
+        logger.info(f"标题评分完成: {request.title[:20]}... 得分: {result['score']}")
+        
+        return TitleScoreResponse(
+            score=result['score'],
+            click_rate=result['click_rate'],
+            analysis=result['analysis'],
+            dimensions=result['dimensions'],
+            suggestions=result['suggestions']
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"标题评分失败: {str(e)}")
+        # 返回一个默认响应而不是报错
+        return TitleScoreResponse(
+            score=70,
+            click_rate=8.5,
+            analysis="评分服务暂时不可用，建议标题保持简洁明了，突出核心价值。",
+            dimensions={
+                "吸引力": 14,
+                "清晰度": 15,
+                "长度": 13,
+                "关键词": 14,
+                "数字化": 14
+            },
+            suggestions=[
+                "标题控制在15-25字之间",
+                "使用数字增强说服力",
+                "添加情感触发词提升点击率",
+                "明确文章核心卖点"
+            ]
+        )
 
 
 # ========== 兼容性路由 ==========

@@ -2,6 +2,7 @@ from . import (
     health,
     articles,
     news,
+    observability,
     wechat,
     config,
     unified_ai,
@@ -13,13 +14,16 @@ from . import (
     creator,
     publish,
     multiplatform,
-    preview
+    preview,
+    rss_sources,
+    image_providers
 )
 
 __all__ = [
     "health",
     "articles",
     "news",
+    "observability",
     "wechat",
     "config",
     "unified_ai",
@@ -31,5 +35,7 @@ __all__ = [
     "creator",
     "publish",
     "multiplatform",
-    "preview"
+    "preview",
+    "rss_sources",
+    "image_providers"
 ]

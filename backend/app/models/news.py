@@ -5,15 +5,19 @@ import enum
 
 
 class NewsSource(str, enum.Enum):
+    # 6个核心源
     ITHOME = "ithome"       # IT之家
-    BAIDU = "baidu"         # 百度资讯
     KR36 = "kr36"           # 36氪
     SSPAI = "sspai"         # 少数派
     HUXIU = "huxiu"         # 虎嗅
-    TMPOST = "tmpost"       # 钛媒体
     INFOQ = "infoq"         # InfoQ
+    OSCHINA = "oschina"     # 开源中国
+    # 其他源
+    BAIDU = "baidu"         # 百度
+    TMPOST = "tmpost"       # 钛媒体
     JUEJIN = "juejin"       # 掘金
     ZHIHU_DAILY = "zhihu_daily"  # 知乎日报
+    # 其他/自定义
     OTHER = "other"         # 其他
 
 

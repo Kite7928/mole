@@ -282,6 +282,8 @@ async def publish_to_platforms(
         发布结果
     """
     try:
+        logger.info(f"收到多平台发布请求: 文章ID={request.article_id}, 平台={request.platforms}")
+        
         # 1. 验证文章
         query = select(Article).where(Article.id == request.article_id)
         result = await db.execute(query)
@@ -309,7 +311,7 @@ async def publish_to_platforms(
             summary=article.summary,
             cover_image=article.cover_image_url,
             tags=article.get_tags_list() if article.tags else None,
-            author="AI助手"
+            author="拾贝猫"
         )
         
         # 4. 发布
@@ -332,10 +334,19 @@ async def publish_to_platforms(
                     "article_id": result.article_id,
                     "article_url": result.article_url
                 })
+                # 记录每个平台的详细结果
+                if result.success:
+                    logger.info(f"平台 {platform.value} 发布成功: {result.message}")
+                else:
+                    logger.error(f"平台 {platform.value} 发布失败: {result.message}")
+            
+            success_count = len([r for r in results.values() if r.success])
+            failed_count = len([r for r in results.values() if not r.success])
+            logger.info(f"批量发布完成: 成功 {success_count}, 失败 {failed_count}")
             
             return {
-                "success": True,
-                "message": f"已发布到 {len([r for r in results.values() if r.success])} 个平台",
+                "success": failed_count == 0,
+                "message": f"已发布到 {success_count} 个平台, 失败 {failed_count} 个",
                 "results": formatted_results
             }
         else:

@@ -1,5 +1,6 @@
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import declarative_base
+from sqlalchemy import text
 from typing import AsyncGenerator
 from .config import settings
 import os
@@ -31,6 +32,9 @@ async_session_maker = async_sessionmaker(
     class_=AsyncSession,
     expire_on_commit=False,
 )
+
+# 向后兼容：部分历史代码与测试仍使用 `async_session`
+async_session = async_session_maker
 
 # 创建模型基类
 Base = declarative_base()
@@ -65,6 +69,26 @@ async def init_db() -> None:
     """
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+        # 轻量兼容迁移：补齐旧版 SQLite 缺失字段
+        if settings.DATABASE_URL.startswith("sqlite"):
+            try:
+                result = await conn.execute(text("PRAGMA table_info(articles)"))
+                columns = {row[1] for row in result.fetchall()}
+
+                if "series_id" not in columns:
+                    await conn.execute(text("ALTER TABLE articles ADD COLUMN series_id INTEGER"))
+                if "series_order" not in columns:
+                    await conn.execute(text("ALTER TABLE articles ADD COLUMN series_order INTEGER DEFAULT 0"))
+                if "quality_check_status" not in columns:
+                    await conn.execute(text("ALTER TABLE articles ADD COLUMN quality_check_status VARCHAR(20) DEFAULT 'unchecked'"))
+                if "quality_check_data" not in columns:
+                    await conn.execute(text("ALTER TABLE articles ADD COLUMN quality_check_data TEXT"))
+                if "quality_checked_at" not in columns:
+                    await conn.execute(text("ALTER TABLE articles ADD COLUMN quality_checked_at DATETIME"))
+            except Exception:
+                # 兼容迁移失败不阻断启动
+                pass
 
 
 async def close_db() -> None:

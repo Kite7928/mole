@@ -8,6 +8,7 @@ from typing import List, Dict, Any, AsyncGenerator, Optional
 import random
 import asyncio
 import tiktoken
+from sqlalchemy import select
 
 from ..core.config import settings
 from ..core.logger import logger
@@ -99,11 +100,26 @@ class UnifiedAIService:
         self._db_configs: Dict[str, Dict[str, Any]] = {}
 
     async def _load_db_configs(self) -> Dict[str, Dict[str, Any]]:
-        """从数据库加载AI提供商配置"""
+        """从数据库加载AI提供商配置（包含真实API Key）"""
         try:
             async with async_session_maker() as db:
-                db_configs = await config_service.get_all_provider_configs(db)
-                return {cfg["provider"]: cfg for cfg in db_configs if cfg.get("has_api_key")}
+                from ..models.ai_provider_config import AIProviderConfig
+                result = await db.execute(
+                    select(AIProviderConfig).where(AIProviderConfig.api_key.isnot(None))
+                )
+                configs = result.scalars().all()
+                result_dict = {}
+                for cfg in configs:
+                    result_dict[cfg.provider] = {
+                        "provider": cfg.provider,
+                        "api_key": cfg.api_key,
+                        "has_api_key": bool(cfg.api_key),
+                        "base_url": cfg.base_url,
+                        "model": cfg.model,
+                        "is_enabled": cfg.is_enabled,
+                        "is_default": cfg.is_default,
+                    }
+                return result_dict
         except Exception as e:
             logger.warning(f"从数据库加载配置失败: {e}，将使用环境变量配置")
             return {}
@@ -146,25 +162,26 @@ class UnifiedAIService:
 
         # 从数据库加载配置
         self._db_configs = await self._load_db_configs()
-        
+
         if self._db_configs:
             logger.info(f"从数据库加载了 {len(self._db_configs)} 个AI提供商配置")
 
         # 初始化所有支持的提供商
         for provider_type, default_config in DEFAULT_PROVIDER_CONFIGS.items():
             provider_id = provider_type.value
-            
+
             # 检查数据库配置
             db_config = self._db_configs.get(provider_id)
-            
+
             if db_config and db_config.get("is_enabled"):
-                # 使用数据库配置（URL和模型），但API Key从环境变量读取
-                api_key = self._get_api_key(provider_type, default_config)
+                # 使用数据库配置的API Key、URL和模型
+                api_key = db_config.get("api_key") or self._get_api_key(provider_type, default_config)
                 if api_key or provider_type == AIProvider.OLLAMA:
                     base_url = db_config.get("base_url") or default_config["base_url"]
+                    # 优先使用数据库中的模型配置
                     model = db_config.get("model") or default_config["model"]
                     self._init_provider(provider_type, api_key, base_url, model)
-                    logger.info(f"已初始化 {provider_id}（使用数据库配置）")
+                    logger.info(f"已初始化 {provider_id}（模型: {model}）")
             else:
                 # 使用环境变量配置
                 api_key = self._get_api_key(provider_type, default_config)
@@ -185,11 +202,30 @@ class UnifiedAIService:
         await self.initialize()
 
     def _get_available_providers(self) -> List[AIProvider]:
-        """获取所有可用的提供商"""
-        return [
-            provider_type for provider_type, provider in self.providers.items()
-            if provider.is_available
-        ]
+        """获取所有可用的提供商（默认提供商排在最前面）"""
+        available = []
+        default_provider = None
+
+        # 找出默认提供商
+        for provider_id, config in self._db_configs.items():
+            if config.get("is_default"):
+                try:
+                    default_provider = AIProvider(provider_id)
+                    break
+                except ValueError:
+                    continue
+
+        # 收集所有可用提供商
+        for provider_type, provider in self.providers.items():
+            if provider.is_available:
+                available.append(provider_type)
+
+        # 将默认提供商移到最前面
+        if default_provider and default_provider in available:
+            available.remove(default_provider)
+            available.insert(0, default_provider)
+
+        return available
 
     def _get_next_provider(self) -> AIProvider | None:
         """获取下一个提供商（根据轮询策略）"""
@@ -277,6 +313,7 @@ class UnifiedAIService:
 
         last_error = None
         specified_provider = provider
+        specified_model = model
 
         for attempt in range(max_retries):
             try:
@@ -291,16 +328,17 @@ class UnifiedAIService:
                     logger.warning(f"提供商 {provider.value} 不可用，尝试下一个")
                     continue
 
-                # 获取模型
-                if model is None:
-                    model = provider_instance.get_default_model()
+                # 获取模型（使用局部变量，避免修改外部参数）
+                current_model = specified_model
+                if current_model is None:
+                    current_model = provider_instance.get_default_model()
 
-                logger.info(f"调用 {provider.value}，模型: {model} (尝试 {attempt + 1}/{max_retries})")
+                logger.info(f"调用 {provider.value}，模型: {current_model} (尝试 {attempt + 1}/{max_retries})")
 
                 # 调用提供商生成响应
                 response = await provider_instance.generate(
                     messages=messages,
-                    model=model,
+                    model=current_model,
                     temperature=temperature,
                     max_tokens=max_tokens
                 )

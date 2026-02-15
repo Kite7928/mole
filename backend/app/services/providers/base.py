@@ -4,6 +4,7 @@ AI提供商抽象基类
 
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, AsyncGenerator
+import inspect
 from . import AIProvider, AIResponse
 
 
@@ -52,4 +53,13 @@ class BaseAIProvider(ABC):
     async def close(self):
         """关闭连接"""
         if self._client:
-            await self._client.aclose()
+            close_func = getattr(self._client, "aclose", None)
+            if close_func is None:
+                close_func = getattr(self._client, "close", None)
+
+            if close_func is None:
+                return
+
+            result = close_func()
+            if inspect.isawaitable(result):
+                await result

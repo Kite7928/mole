@@ -44,6 +44,12 @@ async def db_session():
 
 
 @pytest.fixture(scope="function")
+async def db(db_session: AsyncSession):
+    """兼容旧测试命名：db -> db_session"""
+    yield db_session
+
+
+@pytest.fixture(scope="function")
 async def client(db_session: AsyncSession):
     """Create a test client."""
     async def override_get_db():

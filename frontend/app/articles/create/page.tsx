@@ -6,46 +6,117 @@ import {
   Wand2, 
   RefreshCw, 
   Check, 
-  Copy,
+  ShieldCheck,
+  ShieldAlert,
+  AlertTriangle,
   Save,
   Send,
   ChevronRight,
   Loader2,
-  Smartphone,
-  Edit3,
-  Eye
+  ArrowLeft,
+  Image as ImageIcon,
+  FileText,
+  Type,
+  BarChart3,
+  PenTool
 } from 'lucide-react'
-import { generateTitles, generateContent, createArticle, publishToWechat, updateArticle } from '@/lib/api'
+import {
+  generateTitles,
+  generateContent,
+  createArticle,
+  updateArticle,
+  publishToWechat,
+  scoreTitle,
+  checkSensitiveContent,
+  type TitleScoreResponse,
+  type SensitiveWordMatch,
+} from '@/lib/api'
 import { API_URL } from '@/lib/api'
+import RichEditor from '@/components/rich-editor'
+
+
+interface TitleOption {
+  title: string
+  click_rate: number
+  score: number
+  reason: string
+}
+
+
+interface GeneratedContentState {
+  title: string
+  summary: string
+  content: string
+  qualityScore: number
+}
+
+
+interface ContentVariant extends GeneratedContentState {
+  key: 'A' | 'B'
+}
+
+interface PrePublishCheckResult {
+  pass: boolean
+  checkedAt: string
+  titleScore: TitleScoreResponse | null
+  hasSensitive: boolean
+  sensitiveCount: number
+  sensitiveMatches: SensitiveWordMatch[]
+  filteredContent?: string
+  formatWarnings: string[]
+  blockingIssues: string[]
+}
+
+type QualityCheckStatus = 'unchecked' | 'pass' | 'warning' | 'blocked'
 
 export default function ArticleCreate() {
-  const [step, setStep] = useState<'input' | 'titles' | 'content' | 'preview'>('input')
+  const [step, setStep] = useState<'input' | 'titles' | 'preview'>('input')
   const [isEditMode, setIsEditMode] = useState(false)
   const [editArticleId, setEditArticleId] = useState<number | null>(null)
   const [isGenerating, setIsGenerating] = useState(false)
-  const [selectedTitle, setSelectedTitle] = useState<string | null>(null)
+  const [selectedTitleCandidates, setSelectedTitleCandidates] = useState<string[]>([])
   const [topic, setTopic] = useState('')
-  const [aiModel, setAiModel] = useState('deepseek-chat')
+  const [aiModel, setAiModel] = useState('qwen-max')
   const [writingStyle, setWritingStyle] = useState('professional')
-  const [generatedTitles, setGeneratedTitles] = useState<any[]>([])
-  const [generatedContent, setGeneratedContent] = useState<any>(null)
-  const [showWechatPreview, setShowWechatPreview] = useState(false)
+  const [generatedTitles, setGeneratedTitles] = useState<TitleOption[]>([])
+  const [generatedContent, setGeneratedContent] = useState<GeneratedContentState | null>(null)
+  const [contentVariants, setContentVariants] = useState<ContentVariant[]>([])
+  const [activeVariantKey, setActiveVariantKey] = useState<'A' | 'B' | null>(null)
   const [editingContent, setEditingContent] = useState('')
+  const [editorMode, setEditorMode] = useState<'plain' | 'rich'>('plain')
   const [isSaving, setIsSaving] = useState(false)
-  const [savedArticleId, setSavedArticleId] = useState<number | null>(null)
+  const [generateCoverImage, setGenerateCoverImage] = useState(true)
+  const [coverImageUrl, setCoverImageUrl] = useState<string>('')
+  const [newsSource, setNewsSource] = useState<{title?: string, source?: string} | null>(null)
+  const [generationError, setGenerationError] = useState<string>('')
+  const [isScoringTitle, setIsScoringTitle] = useState(false)
+  const [titleScores, setTitleScores] = useState<Record<string, TitleScoreResponse>>({})
+  const [activeTitleScore, setActiveTitleScore] = useState<TitleScoreResponse | null>(null)
+  const [isQualityChecking, setIsQualityChecking] = useState(false)
+  const [qualityCheck, setQualityCheck] = useState<PrePublishCheckResult | null>(null)
 
-  // 检查是否为编辑模式
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const editId = params.get('editId')
+    const articleId = params.get('article_id')
+    const fromNews = params.get('from_news')
+    const titleFromNews = params.get('title')
+    const sourceFromNews = params.get('source')
+    
     if (editId) {
       setIsEditMode(true)
       setEditArticleId(parseInt(editId))
       loadArticle(parseInt(editId))
+    } else if (articleId) {
+      setIsEditMode(true)
+      setEditArticleId(parseInt(articleId))
+      loadArticle(parseInt(articleId))
+      if (fromNews && titleFromNews) {
+        setNewsSource({ title: decodeURIComponent(titleFromNews), source: sourceFromNews ? decodeURIComponent(sourceFromNews) : undefined })
+      }
     }
   }, [])
 
-  // 加载现有文章数据
   const loadArticle = async (articleId: number) => {
     try {
       const response = await fetch(`${API_URL}/api/articles/${articleId}`)
@@ -53,695 +124,1280 @@ export default function ArticleCreate() {
         const article = await response.json()
         setTopic(article.title)
         setEditingContent(article.content)
-        setGeneratedContent({
+        let summary = article.summary || ''
+        if (summary.includes('点击查看原文') || summary.includes('http')) {
+          summary = article.content ? article.content.substring(0, 200).replace(/[#*\n]/g, ' ') + '...' : ''
+        }
+        const loadedContent: GeneratedContentState = {
+          title: article.title,
           content: article.content,
-          summary: article.summary,
-          word_count: article.content?.length || 0
-        })
-        setSelectedTitle(article.title)
-        setSavedArticleId(articleId)
-        setStep('content')
+          summary: summary,
+          qualityScore: article.quality_score || 85
+        }
+        setGeneratedContent(loadedContent)
+        setContentVariants([{ key: 'A', ...loadedContent }])
+        setActiveVariantKey('A')
+        setSelectedTitleCandidates([article.title])
+        setActiveTitleScore(null)
+        setQualityCheck(null)
+        setCoverImageUrl(article.cover_image_url || '')
+        setStep('preview')
       }
     } catch (error) {
       console.error('加载文章失败:', error)
     }
   }
-  
-  // 图片生成配置
-  const [generateCoverImage, setGenerateCoverImage] = useState(true)
-  const [imageProvider, setImageProvider] = useState('cogview')
-  const [imageStyle, setImageStyle] = useState('professional')
 
-  const steps = [
-    { id: 'input', name: '输入主题', icon: '✍️' },
-    { id: 'titles', name: '选择标题', icon: '📝' },
-    { id: 'content', name: '生成内容', icon: '✨' },
-    { id: 'preview', name: '预览发布', icon: '👀' }
-  ]
+  const sanitizeSummary = (summary: string, content: string, fallbackTopic: string) => {
+    if (summary.includes('点击查看原文') || summary.includes('http') || !summary.trim()) {
+      return content ? content.substring(0, 200).replace(/[#*\n]/g, ' ') + '...' : `本文深入探讨了${fallbackTopic}的核心概念。`
+    }
+    return summary
+  }
+
+  const normalizeTitles = (titles: any[]): TitleOption[] => {
+    return titles.map((item: any, index: number) => {
+      const clickRate = Math.round(Number(item?.click_rate ?? item?.score ?? 75))
+      const score = Math.round(Number(item?.score ?? item?.click_rate ?? 75))
+      return {
+        title: String(item?.title ?? ''),
+        click_rate: clickRate,
+        score,
+        reason: item?.reason || `预估点击率 ${clickRate}%`
+      }
+    }).filter((item: TitleOption) => !!item.title)
+  }
+
+  const buildVariant = (
+    variantKey: 'A' | 'B',
+    title: string,
+    payload: any
+  ): ContentVariant => {
+    const contentText = payload?.content || ''
+    const summary = sanitizeSummary(payload?.summary || '', contentText, topic)
+    return {
+      key: variantKey,
+      title,
+      summary,
+      content: contentText,
+      qualityScore: Math.round(payload?.quality_score || 85),
+    }
+  }
+
+  const applyActiveVariant = (variant: ContentVariant) => {
+    setActiveVariantKey(variant.key)
+    setGeneratedContent({
+      title: variant.title,
+      summary: variant.summary,
+      content: variant.content,
+      qualityScore: variant.qualityScore,
+    })
+    setEditingContent(variant.content)
+    setActiveTitleScore(titleScores[variant.title] || null)
+    setQualityCheck(null)
+    setStep('preview')
+  }
+
+  const handleTitleCandidatesToggle = (title: string) => {
+    setSelectedTitleCandidates((prev) => {
+      if (prev.includes(title)) {
+        return prev.filter((item) => item !== title)
+      }
+      if (prev.length >= 2) {
+        return [...prev.slice(1), title]
+      }
+      return [...prev, title]
+    })
+  }
+
+  const generateContentFromCandidates = async () => {
+    const targets = selectedTitleCandidates.slice(0, 2)
+    if (targets.length === 0) {
+      alert('请先选择至少一个标题')
+      return
+    }
+
+    setIsGenerating(true)
+    setGenerationError('')
+    setQualityCheck(null)
+
+    try {
+      try {
+        await refreshTitleScores(targets)
+      } catch {
+        // 标题评分失败不阻断正文生成
+      }
+
+      const settled = await Promise.allSettled(
+        targets.map((title) => generateContent(topic, title, writingStyle, 'medium', aiModel))
+      )
+
+      const variants: ContentVariant[] = []
+      const failures: string[] = []
+
+      settled.forEach((result, index) => {
+        const variantKey: 'A' | 'B' = index === 0 ? 'A' : 'B'
+        const title = targets[index]
+
+        if (result.status === 'fulfilled') {
+          variants.push(buildVariant(variantKey, title, result.value))
+        } else {
+          failures.push(`${variantKey}版《${title}》生成失败`)
+        }
+      })
+
+      if (variants.length === 0) {
+        throw new Error('正文生成失败，请检查AI配置后重试')
+      }
+
+      setContentVariants(variants)
+      applyActiveVariant(variants[0])
+
+      if (failures.length > 0) {
+        alert(`部分版本生成失败：\n${failures.join('\n')}`)
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '生成内容失败，请检查AI配置后重试'
+      setGenerationError(message)
+      alert(message)
+    } finally {
+      setIsGenerating(false)
+    }
+  }
+
+  const handleVariantSwitch = (variantKey: 'A' | 'B') => {
+    const targetVariant = contentVariants.find((item) => item.key === variantKey)
+    if (!targetVariant) return
+    applyActiveVariant(targetVariant)
+  }
+
+  const handleTitleChange = (value: string) => {
+    if (!generatedContent) return
+    setGeneratedContent({ ...generatedContent, title: value })
+    setActiveTitleScore(titleScores[value] || null)
+    setQualityCheck(null)
+    if (!activeVariantKey) return
+    setContentVariants((prev) => prev.map((item) => (
+      item.key === activeVariantKey ? { ...item, title: value } : item
+    )))
+  }
+
+  const handleSummaryChange = (value: string) => {
+    if (!generatedContent) return
+    setGeneratedContent({ ...generatedContent, summary: value })
+    setQualityCheck(null)
+    if (!activeVariantKey) return
+    setContentVariants((prev) => prev.map((item) => (
+      item.key === activeVariantKey ? { ...item, summary: value } : item
+    )))
+  }
+
+  const handleContentChange = (value: string) => {
+    setEditingContent(value)
+    setQualityCheck(null)
+    if (!activeVariantKey) return
+    setContentVariants((prev) => prev.map((item) => (
+      item.key === activeVariantKey ? { ...item, content: value } : item
+    )))
+  }
+
+  const toPlainText = (value: string) => {
+    return value
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+  }
+
+  const analyzeContentFormat = (title: string, summary: string, content: string) => {
+    const warnings: string[] = []
+    const blocking: string[] = []
+
+    const plainText = toPlainText(content)
+    const contentLength = plainText.length
+    const titleLength = title.trim().length
+    const summaryLength = summary.trim().length
+
+    const hasMarkdownHeading = /(^|\n)#{1,3}\s+\S+/m.test(content)
+    const hasHtmlHeading = /<h[1-3][^>]*>.*?<\/h[1-3]>/i.test(content)
+    const hasHeading = hasMarkdownHeading || hasHtmlHeading
+
+    const markdownParagraphs = content.split(/\n{2,}/).filter((item) => item.trim().length > 0).length
+    const htmlParagraphs = (content.match(/<p[\s>]/gi) || []).length
+    const paragraphCount = Math.max(markdownParagraphs, htmlParagraphs)
+
+    if (!title.trim()) {
+      blocking.push('标题不能为空')
+    }
+
+    if (contentLength < 300) {
+      blocking.push('正文内容过短（少于300字），建议补充后再发布')
+    }
+
+    if (titleLength > 35 || titleLength < 10) {
+      warnings.push('标题建议控制在10~35字，避免过短或过长')
+    }
+
+    if (summaryLength < 40) {
+      warnings.push('摘要偏短，建议补充到40字以上以提升分发效果')
+    }
+
+    if (!hasHeading) {
+      warnings.push('正文缺少小标题，建议加入至少1个二级标题提升可读性')
+    }
+
+    if (paragraphCount < 3) {
+      warnings.push('段落层次偏少，建议拆分为至少3个段落')
+    }
+
+    const hasImage = /<img\s+[^>]*src=|!\[[^\]]*\]\([^\)]+\)/i.test(content)
+    if (!hasImage) {
+      warnings.push('正文暂未包含配图，建议添加至少1张配图提升阅读完成率')
+    }
+
+    return {
+      warnings,
+      blocking,
+      contentLength,
+    }
+  }
+
+  const refreshTitleScores = async (titles: string[]) => {
+    if (titles.length === 0) {
+      return {}
+    }
+
+    setIsScoringTitle(true)
+    const scoreMap: Record<string, TitleScoreResponse> = {}
+
+    try {
+      const settled = await Promise.allSettled(
+        titles.map((title) => scoreTitle(title, topic, aiModel))
+      )
+
+      settled.forEach((result, index) => {
+        if (result.status === 'fulfilled') {
+          scoreMap[titles[index]] = result.value
+        }
+      })
+
+      if (Object.keys(scoreMap).length === 0) {
+        throw new Error('标题评分服务暂时不可用')
+      }
+
+      setTitleScores((prev) => ({ ...prev, ...scoreMap }))
+      setGeneratedTitles((prev) => prev.map((item) => {
+        const scoreResult = scoreMap[item.title]
+        if (!scoreResult) return item
+        return {
+          ...item,
+          score: Math.round(scoreResult.score),
+          click_rate: Math.round(scoreResult.click_rate),
+          reason: scoreResult.analysis || `预估点击率 ${Math.round(scoreResult.click_rate)}%`
+        }
+      }))
+
+      return scoreMap
+    } finally {
+      setIsScoringTitle(false)
+    }
+  }
+
+  const handleScoreSelectedTitles = async () => {
+    const targets = selectedTitleCandidates.slice(0, 2)
+    if (targets.length === 0) {
+      alert('请先选择至少一个标题')
+      return
+    }
+
+    try {
+      const scoreMap = await refreshTitleScores(targets)
+      const first = scoreMap[targets[0]]
+      if (first) {
+        setActiveTitleScore(first)
+      }
+      alert('标题评分已更新')
+    } catch (error: any) {
+      alert(error?.message || '标题评分失败')
+    }
+  }
+
+  const handleScoreCurrentTitle = async () => {
+    if (!generatedContent?.title?.trim()) {
+      alert('请先输入标题')
+      return
+    }
+
+    setIsScoringTitle(true)
+    try {
+      const result = await scoreTitle(generatedContent.title, topic, aiModel)
+      setTitleScores((prev) => ({ ...prev, [generatedContent.title]: result }))
+      setActiveTitleScore(result)
+      alert('标题评分完成')
+    } catch (error: any) {
+      alert(error?.message || '标题评分失败')
+    } finally {
+      setIsScoringTitle(false)
+    }
+  }
+
+  const handleOptimizeCurrentTitle = async () => {
+    const currentTitle = generatedContent?.title?.trim()
+    if (!currentTitle) {
+      alert('请先输入标题')
+      return
+    }
+
+    setIsScoringTitle(true)
+    try {
+      const seedTopic = topic.trim() || currentTitle
+      const generated = await generateTitles(seedTopic, 6, aiModel)
+      const normalized = normalizeTitles(generated)
+
+      const uniqueCandidates = Array.from(new Set([
+        currentTitle,
+        ...normalized.map((item) => item.title.trim()).filter(Boolean),
+      ])).slice(0, 6)
+
+      let scoreMap: Record<string, TitleScoreResponse> = {}
+      try {
+        const settled = await Promise.allSettled(
+          uniqueCandidates.map((title) => scoreTitle(title, seedTopic, aiModel))
+        )
+
+        settled.forEach((result, index) => {
+          if (result.status === 'fulfilled') {
+            scoreMap[uniqueCandidates[index]] = result.value
+          }
+        })
+
+        if (Object.keys(scoreMap).length > 0) {
+          setTitleScores((prev) => ({ ...prev, ...scoreMap }))
+        }
+      } catch {
+        scoreMap = {}
+      }
+
+      const ranked = uniqueCandidates
+        .map((title, index) => ({
+          title,
+          score: scoreMap[title]?.score ?? 0,
+          clickRate: scoreMap[title]?.click_rate ?? 0,
+          index,
+        }))
+        .sort((a, b) => {
+          if (b.score !== a.score) {
+            return b.score - a.score
+          }
+          if (b.clickRate !== a.clickRate) {
+            return b.clickRate - a.clickRate
+          }
+          return a.index - b.index
+        })
+
+      const optimized = ranked.find((item) => item.title !== currentTitle)
+      if (!optimized) {
+        alert('暂未生成更优标题，请调整主题后重试')
+        return
+      }
+
+      handleTitleChange(optimized.title)
+      setSelectedTitleCandidates((prev) => {
+        const merged = Array.from(new Set([optimized.title, ...prev]))
+        return merged.slice(0, 2)
+      })
+      setActiveTitleScore(scoreMap[optimized.title] || null)
+
+      if (scoreMap[optimized.title]) {
+        alert(`已生成更优标题：${optimized.title}`)
+      } else {
+        alert(`已为你生成推荐标题：${optimized.title}`)
+      }
+    } catch (error: any) {
+      alert(error?.message || '标题优化失败')
+    } finally {
+      setIsScoringTitle(false)
+    }
+  }
+
+  const runPrePublishCheck = async (): Promise<PrePublishCheckResult> => {
+    if (!generatedContent) {
+      throw new Error('请先生成正文内容')
+    }
+
+    setIsQualityChecking(true)
+    try {
+      const latestTitle = generatedContent.title || ''
+      const latestSummary = generatedContent.summary || ''
+      const latestContent = editingContent || ''
+
+      const formatResult = analyzeContentFormat(latestTitle, latestSummary, latestContent)
+
+      let sensitiveCount = 0
+      let sensitiveMatches: SensitiveWordMatch[] = []
+      let filteredContent: string | undefined
+      let hasSensitive = false
+
+      try {
+        const sensitiveResult = await checkSensitiveContent(latestContent)
+        sensitiveCount = sensitiveResult.total_count || 0
+        sensitiveMatches = sensitiveResult.matches || []
+        filteredContent = sensitiveResult.filtered_content
+        hasSensitive = !!sensitiveResult.has_sensitive
+      } catch {
+        formatResult.warnings.push('敏感词检测服务暂不可用，请手动复核后发布')
+      }
+
+      let currentTitleScore: TitleScoreResponse | null = titleScores[latestTitle] || null
+      if (!currentTitleScore) {
+        try {
+          currentTitleScore = await scoreTitle(latestTitle, topic, aiModel)
+          setTitleScores((prev) => ({ ...prev, [latestTitle]: currentTitleScore as TitleScoreResponse }))
+        } catch {
+          formatResult.warnings.push('标题评分服务暂不可用，未能完成自动评分')
+        }
+      }
+
+      const blockingIssues = [...formatResult.blocking]
+      if (hasSensitive) {
+        blockingIssues.push(`检测到 ${sensitiveCount} 处敏感词，需处理后再发布`)
+      }
+
+      const checkResult: PrePublishCheckResult = {
+        pass: blockingIssues.length === 0,
+        checkedAt: new Date().toISOString(),
+        titleScore: currentTitleScore,
+        hasSensitive,
+        sensitiveCount,
+        sensitiveMatches,
+        filteredContent,
+        formatWarnings: formatResult.warnings,
+        blockingIssues,
+      }
+
+      setQualityCheck(checkResult)
+      setActiveTitleScore(currentTitleScore)
+      return checkResult
+    } finally {
+      setIsQualityChecking(false)
+    }
+  }
+
+  const applySensitiveReplacement = () => {
+    if (!qualityCheck?.filteredContent) {
+      return
+    }
+
+    handleContentChange(qualityCheck.filteredContent)
+    setQualityCheck((prev) => {
+      if (!prev) return prev
+      return {
+        ...prev,
+        hasSensitive: false,
+        sensitiveCount: 0,
+        sensitiveMatches: [],
+        blockingIssues: prev.blockingIssues.filter((item) => !item.includes('敏感词')),
+        pass: prev.blockingIssues.filter((item) => !item.includes('敏感词')).length === 0,
+      }
+    })
+    alert('敏感词已自动替换，请再次执行质检确认')
+  }
+
+  const resolveQualityCheckStatus = (result: PrePublishCheckResult | null): QualityCheckStatus => {
+    if (!result) {
+      return 'unchecked'
+    }
+
+    if (result.blockingIssues.length > 0) {
+      return 'blocked'
+    }
+
+    if (result.formatWarnings.length > 0) {
+      return 'warning'
+    }
+
+    return 'pass'
+  }
+
+  const buildQualityCheckPayload = (result: PrePublishCheckResult | null) => {
+    const qualityCheckStatus = resolveQualityCheckStatus(result)
+
+    if (!result) {
+      return {
+        quality_check_status: qualityCheckStatus,
+        quality_check_data: null,
+        quality_checked_at: null,
+      }
+    }
+
+    return {
+      quality_check_status: qualityCheckStatus,
+      quality_check_data: {
+        pass: result.pass,
+        checkedAt: result.checkedAt,
+        titleScore: result.titleScore,
+        hasSensitive: result.hasSensitive,
+        sensitiveCount: result.sensitiveCount,
+        sensitiveMatches: result.sensitiveMatches,
+        filteredContent: result.filteredContent,
+        formatWarnings: result.formatWarnings,
+        blockingIssues: result.blockingIssues,
+      },
+      quality_checked_at: result.checkedAt,
+    }
+  }
+
+  const handleManualQualityCheck = async () => {
+    try {
+      const result = await runPrePublishCheck()
+      if (result.pass) {
+        alert('质检通过，可发布')
+      } else {
+        alert('质检未通过，请根据提示修正后重试')
+      }
+    } catch (error: any) {
+      alert(error?.message || '质检失败')
+    }
+  }
 
   const aiModels = [
-    { id: 'deepseek-chat', name: 'DeepSeek', description: '开源性能王者', icon: '🚀', borderColor: 'border-orange-400', bgColor: 'bg-orange-50' },
-    { id: 'gpt-4-turbo-preview', name: 'GPT-4', description: 'OpenAI最强模型', icon: '🧠', borderColor: 'border-blue-400', bgColor: 'bg-blue-50' },
-    { id: 'claude-3-opus-20240229', name: 'Claude 3.5', description: 'Anthropic长文本专家', icon: '🎭', borderColor: 'border-purple-400', bgColor: 'bg-purple-50' },
-    { id: 'gemini-pro', name: 'Gemini Pro', description: 'Google多模态模型', icon: '✨', borderColor: 'border-green-400', bgColor: 'bg-green-50' },
-    { id: 'glm-4-flash', name: 'GLM-4 Flash', description: '智谱AI超快响应', icon: '🔮', borderColor: 'border-pink-400', bgColor: 'bg-pink-50' },
+    { id: 'qwen-max', name: '通义千问', icon: '🌐', desc: '推荐' },
+    { id: 'deepseek-chat', name: 'DeepSeek', icon: '🚀', desc: '性价比' },
+    { id: 'gpt-4-turbo-preview', name: 'GPT-4', icon: '🧠', desc: '最强' },
+    { id: 'claude-3-opus-20240229', name: 'Claude', icon: '🎭', desc: '创意' },
   ]
 
   const writingStyles = [
-    { 
-      id: 'professional', 
-      name: '专业解读', 
-      description: '深度分析，数据支撑，适合行业洞察',
-      example: '根据最新数据显示...',
-      color: 'from-indigo-500 to-blue-500',
-      icon: '📊',
-      tags: ['10w+', '深度']
-    },
-    { 
-      id: 'casual', 
-      name: '轻松聊天', 
-      description: '像朋友一样自然交流，降低阅读门槛',
-      example: '最近发现一个有趣的现象...',
-      color: 'from-green-500 to-emerald-500',
-      icon: '💬',
-      tags: ['易读', '亲和']
-    },
-    { 
-      id: 'story', 
-      name: '故事共鸣', 
-      description: '用真实案例打动人心，引发情感共鸣',
-      example: '去年这个时候，我遇到了...',
-      color: 'from-orange-500 to-red-500',
-      icon: '📖',
-      tags: ['情感', '共鸣']
-    },
-    { 
-      id: 'opinion', 
-      name: '犀利观点', 
-      description: '独到见解，敢于表达，引发讨论',
-      example: '说实话，我不太认同...',
-      color: 'from-purple-500 to-pink-500',
-      icon: '⚡',
-      tags: ['爆款', '争议']
-    },
-    { 
-      id: 'trend', 
-      name: '热点追踪', 
-      description: '紧跟时事，快速解读，抓住流量风口',
-      example: '刚刚发生的这件事引发热议...',
-      color: 'from-blue-500 to-cyan-500',
-      icon: '🔥',
-      tags: ['时效', '流量']
-    },
-    { 
-      id: 'dry_goods', 
-      name: '干货教程', 
-      description: '步骤清晰，实用可操作，收藏率高',
-      example: '只需要3步，就能掌握...',
-      color: 'from-amber-500 to-orange-500',
-      icon: '📚',
-      tags: ['实用', '收藏']
-    },
-    { 
-      id: 'gold_sentence', 
-      name: '金句开头', 
-      description: '用金句或反常识开场，吸引注意力',
-      example: '90%的人都不知道的是...',
-      color: 'from-yellow-500 to-amber-500',
-      icon: '✨',
-      tags: ['吸睛', '好奇']
-    },
-    { 
-      id: 'qa_format', 
-      name: '问答互动', 
-      description: 'Q&A形式，解答痛点，互动性强',
-      example: 'Q: 为什么总是... A: 因为...',
-      color: 'from-teal-500 to-cyan-500',
-      icon: '❓',
-      tags: ['互动', '解惑']
-    },
-  ]
-
-  const imageProviders = [
-    { id: 'cogview', name: 'Cogview-3-Flash', description: '智谱AI快速生成', icon: '🎨', borderColor: 'border-pink-400', bgColor: 'bg-pink-50' },
-    { id: 'dalle', name: 'DALL-E 3', description: 'OpenAI专业模型', icon: '🖼️', borderColor: 'border-blue-400', bgColor: 'bg-blue-50' },
-    { id: 'midjourney', name: 'Midjourney', description: '艺术创作首选', icon: '🎭', borderColor: 'border-purple-400', bgColor: 'bg-purple-50' },
-    { id: 'stable-diffusion', name: 'Stable Diffusion', description: '开源灵活选择', icon: '🌊', borderColor: 'border-green-400', bgColor: 'bg-green-50' },
+    { id: 'professional', name: '专业解读', icon: '📊', desc: '深度分析' },
+    { id: 'casual', name: '轻松聊天', icon: '💬', desc: '亲和力强' },
+    { id: 'story', name: '故事共鸣', icon: '📖', desc: '引人入胜' },
   ]
 
   const handleGenerateTitles = async () => {
+    if (!topic.trim()) { alert('请输入主题'); return }
     setIsGenerating(true)
+    setGenerationError('')
+    setActiveTitleScore(null)
+    setQualityCheck(null)
     try {
-      // 调用真实API生成标题
       const titles = await generateTitles(topic, 5, aiModel)
-      setGeneratedTitles(titles.map((t: any, index: number) => ({
-        id: index + 1,
-        title: t.title,
-        predictedClickRate: Math.round(t.click_rate)
-      })))
+      const normalizedTitles = normalizeTitles(titles)
+      setGeneratedTitles(normalizedTitles)
+      setSelectedTitleCandidates(normalizedTitles.slice(0, 2).map((item) => item.title))
       setStep('titles')
-    } catch (error: any) {
-      console.error('生成标题失败:', error)
-      // 降级方案：使用模拟数据
-      console.log('使用模拟标题数据')
-      setGeneratedTitles([
-        { id: 1, title: `${topic}：深入解析与实践指南`, predictedClickRate: 92 },
-        { id: 2, title: `如何有效${topic}？专家分享3个关键技巧`, predictedClickRate: 88 },
-        { id: 3, title: `${topic}的完整方法论：从入门到精通`, predictedClickRate: 85 },
-        { id: 4, title: `90%的人都不知道的${topic}秘诀`, predictedClickRate: 90 },
-        { id: 5, title: `${topic}：2024年最新发展趋势与前景`, predictedClickRate: 82 }
-      ])
-      setStep('titles')
-      // 提示用户
-      if (confirm('AI API 暂时不可用，已生成模拟标题用于测试。是否继续？')) {
-        setStep('titles')
-      } else {
-        setIsGenerating(false)
-      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '生成标题失败'
+      setGenerationError(message)
+      alert(message)
     } finally {
       setIsGenerating(false)
     }
   }
 
-  const handleSelectTitle = (title: string) => {
-    setSelectedTitle(title)
-    setStep('content')
+  const handleSelectTitle = async (title: string) => {
+    handleTitleCandidatesToggle(title)
   }
 
-  const handleGenerateContent = async () => {
-    setIsGenerating(true)
-    try {
-      // 调用真实API生成内容，传递选择的写作风格
-      const content = await generateContent(topic, selectedTitle || '', writingStyle, 'medium', aiModel)
-      setGeneratedContent({
-        title: selectedTitle,
-        summary: content.summary,
-        content: content.content,
-        qualityScore: Math.round(content.quality_score),
-        sources: content.seo_data?.keywords || ['AI生成'],
-      })
-      setEditingContent(content.content)
-      setStep('preview')
-    } catch (error: any) {
-      console.error('生成内容失败:', error)
-      // 降级方案：使用模拟内容
-      console.log('使用模拟内容数据')
-      const mockContent = `# ${selectedTitle}
-
-## 引言
-${topic}是一个备受关注的话题，在当今时代具有重要的意义。本文将深入探讨${topic}的各个方面，帮助读者更好地理解和应用相关知识。
-
-## 核心要点
-
-### 1. 基本概念
-${topic}作为${writingStyle === 'professional' ? '专业领域' : '日常生活中'}的重要组成部分，其核心价值在于解决实际问题。通过深入理解其基本原理，我们可以更好地运用相关方法。
-
-### 2. 实践应用
-在实际应用中，${topic}需要结合具体情况灵活运用。以下是几个关键要点：
-
-- 要点一：明确目标，制定合理的实施计划
-- 要点二：注重细节，确保每个环节都得到充分重视
-- 要点三：持续优化，根据反馈不断改进
-
-### 3. 常见问题与解决方案
-在实践过程中，可能会遇到各种挑战。以下是一些常见问题及其解决方案：
-
-**问题一**：如何快速上手？
-**解决方案**：从基础开始，逐步深入，同时结合实际案例进行练习。
-
-**问题二**：如何提高效率？
-**解决方案**：合理分配时间，优先处理重要任务，善用工具和方法。
-
-## 总结
-${topic}是一个值得深入研究的领域。通过本文的介绍，希望读者能够对其有更清晰的认识，并在实践中取得更好的效果。`
-
-      setGeneratedContent({
-        title: selectedTitle,
-        summary: `本文深入探讨了${topic}的核心概念、实践应用和常见问题，为读者提供了全面的指导。`,
-        content: mockContent,
-        qualityScore: 85,
-        sources: ['模拟数据', 'AI生成'],
-      })
-      setEditingContent(mockContent)
-      setStep('preview')
-      // 提示用户
-      if (confirm('AI API 暂时不可用，已生成模拟内容用于测试。是否继续？')) {
-        setStep('preview')
-      } else {
-        setIsGenerating(false)
-      }
-    } finally {
-      setIsGenerating(false)
+  const persistDraft = async (silent = false, contentOverride?: string): Promise<number> => {
+    if (!generatedContent) {
+      throw new Error('请先生成正文内容')
     }
+
+    const draftContent = contentOverride ?? editingContent
+
+    const summary = sanitizeSummary(
+      generatedContent.summary || '',
+      draftContent,
+      topic
+    )
+    const qualityPayload = buildQualityCheckPayload(qualityCheck)
+
+    if (isEditMode && editArticleId) {
+      await updateArticle(editArticleId, {
+        title: generatedContent.title,
+        content: draftContent,
+        summary,
+        status: 'draft',
+        cover_image_url: coverImageUrl,
+        ...qualityPayload,
+      })
+
+      if (!silent) {
+        alert('保存成功！')
+      }
+      return editArticleId
+    }
+
+    const article = await createArticle({
+      title: generatedContent.title,
+      content: draftContent,
+      summary,
+      status: 'draft',
+      ...qualityPayload,
+      generate_cover_image: generateCoverImage,
+    })
+
+    setEditArticleId(article.id)
+    setIsEditMode(true)
+
+    if (!silent) {
+      alert('保存成功！')
+    }
+
+    return article.id
   }
 
   const handleSaveDraft = async () => {
-    if (!generatedContent) return
     setIsSaving(true)
     try {
-      let article
-      if (isEditMode && editArticleId) {
-        // 编辑模式：更新现有文章
-        article = await updateArticle(editArticleId, {
-          title: generatedContent.title,
-          content: editingContent,
-          summary: generatedContent.summary,
-          source_topic: topic,
-          status: 'draft',
-          tags: generatedContent.sources || [],
-        })
-        alert('文章更新成功！')
-      } else {
-        // 创建模式：创建新文章
-        article = await createArticle({
-          title: generatedContent.title,
-          content: editingContent,
-          summary: generatedContent.summary,
-          source_topic: topic,
-          status: 'draft',
-          tags: generatedContent.sources || [],
-          generate_cover_image: generateCoverImage,
-          image_provider: imageProvider,
-          image_style: imageStyle,
-        })
-        setSavedArticleId(article.id)
-        alert('草稿保存成功！')
-      }
+      await persistDraft(false)
     } catch (error: any) {
-      console.error('保存草稿失败:', error)
-      alert('保存失败：' + (error.message || '请稍后重试'))
+      alert(`保存失败: ${error?.message || '未知错误'}`)
     } finally {
       setIsSaving(false)
     }
   }
 
   const handlePublish = async () => {
-    if (!generatedContent) return
+    if (!confirm('确定要发布到微信公众号吗？')) return
+    if (!generatedContent) {
+      alert('请先生成正文内容')
+      return
+    }
+
     setIsSaving(true)
     try {
-      let article
-      if (isEditMode && editArticleId) {
-        // 编辑模式：更新现有文章
-        article = await updateArticle(editArticleId, {
-          title: generatedContent.title,
-          content: editingContent,
-          summary: generatedContent.summary,
-          source_topic: topic,
-          status: 'ready',
-          tags: generatedContent.sources || [],
-        })
-      } else {
-        // 创建模式：创建新文章
-        article = await createArticle({
-          title: generatedContent.title,
-          content: editingContent,
-          summary: generatedContent.summary,
-          source_topic: topic,
-          status: 'draft',
-          tags: generatedContent.sources || [],
-          generate_cover_image: generateCoverImage,
-          image_provider: imageProvider,
-          image_style: imageStyle,
-        })
-        setSavedArticleId(article.id)
+      const checkResult = await runPrePublishCheck()
+      if (checkResult.blockingIssues.length > 0) {
+        alert(`发布前质检未通过：\n${checkResult.blockingIssues.map((item) => `- ${item}`).join('\n')}`)
+        return
       }
 
-      // 第二步：发布到微信草稿箱
-      try {
-        const wechatResult = await publishToWechat({
-          title: generatedContent.title,
-          content: editingContent,
-          digest: generatedContent.summary,
-          author: 'AI助手',
-        })
-
-        // 更新文章状态为已发布
-        await updateArticle(article.id, {
-          status: 'published',
-          wechat_draft_id: wechatResult.draft_id,
-        })
-
-        alert('文章已成功发布到微信草稿箱！')
-      } catch (wechatError: any) {
-        console.error('发布到微信失败:', wechatError)
-        alert('草稿已保存到数据库，但发布到微信失败：' + (wechatError.message || '请检查微信配置'))
+      if (checkResult.formatWarnings.length > 0) {
+        const proceed = confirm(
+          `质检发现以下优化项：\n${checkResult.formatWarnings.map((item) => `- ${item}`).join('\n')}\n\n是否仍要继续发布？`
+        )
+        if (!proceed) {
+          return
+        }
       }
+
+      let contentForPublish = editingContent
+      if (checkResult.hasSensitive && checkResult.filteredContent) {
+        const confirmReplace = confirm(`检测到 ${checkResult.sensitiveCount} 处敏感词，是否自动替换后继续发布？`)
+        if (!confirmReplace) {
+          return
+        }
+        contentForPublish = checkResult.filteredContent
+        handleContentChange(contentForPublish)
+      }
+
+      const summaryForPublish = sanitizeSummary(
+        generatedContent.summary || '',
+        contentForPublish,
+        topic
+      )
+
+      const articleId = await persistDraft(true, contentForPublish)
+      const result = await publishToWechat({
+        title: generatedContent.title,
+        content: contentForPublish,
+        digest: summaryForPublish
+      })
+
+      if (!result.success) {
+        alert('发布响应异常')
+        return
+      }
+
+      await updateArticle(articleId, { status: 'published', wechat_draft_id: result.draft_id })
+      alert(`发布成功！草稿ID: ${result.draft_id}`)
     } catch (error: any) {
-      console.error('发布文章失败:', error)
-      alert('发布失败：' + (error.message || '请稍后重试'))
+      alert(`发布失败: ${error?.message || '未知错误'}`)
     } finally {
       setIsSaving(false)
     }
   }
 
+  const getScoreColor = (score: number) => {
+    if (score >= 90) return 'text-emerald-600'
+    if (score >= 80) return 'text-blue-600'
+    if (score >= 70) return 'text-amber-600'
+    return 'text-slate-500'
+  }
+
+  const getScoreBgColor = (score: number) => {
+    if (score >= 90) return 'bg-emerald-500'
+    if (score >= 80) return 'bg-blue-500'
+    if (score >= 70) return 'bg-amber-500'
+    return 'bg-slate-400'
+  }
+
   return (
-    <div className="max-w-6xl mx-auto space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold art-gradient-text">
-            {isEditMode ? '编辑文章' : 'AI写作'}
-          </h1>
-          <p className="text-slate-600 mt-1">
-            {isEditMode ? '修改现有文章内容' : '使用AI快速生成高质量内容'}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button className="flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-300 hover:bg-slate-50 transition-colors text-slate-700">
-            <Save size={20} />
-            保存草稿
-          </button>
-          <button className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl hover:shadow-lg hover:shadow-indigo-500/30 transition-all duration-300">
-            <Send size={20} />
-            直接发布
-          </button>
-        </div>
-      </div>
-
-      {/* Progress Steps */}
-      <div className="flex items-center gap-4 p-4 bg-white/95 backdrop-blur-xl rounded-2xl border border-slate-200 shadow-sm">
-        {[
-          { id: 'input', label: '输入主题' },
-          { id: 'titles', label: '选择标题' },
-          { id: 'content', label: '生成内容' },
-          { id: 'preview', label: '预览编辑' },
-        ].map((s, index) => (
-          <div key={s.id} className="flex-1 flex items-center gap-4">
-            <div className={`flex items-center justify-center w-8 h-8 rounded-full ${
-              step === s.id ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-lg shadow-indigo-500/30' :
-              ['input', 'titles', 'content', 'preview'].indexOf(step) > index ? 'bg-emerald-500 text-white' : 'bg-slate-200 text-slate-500'
-            }`}>
-              {['input', 'titles', 'content', 'preview'].indexOf(step) > index ? <Check size={16} /> : index + 1}
+    <div className="min-h-screen bg-slate-50">
+      {/* 头部 */}
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-50">
+        <div className="max-w-4xl mx-auto px-6">
+          <div className="flex items-center justify-between h-14">
+            <div className="flex items-center gap-3">
+              <a href="/articles" className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 transition-colors">
+                <ArrowLeft className="w-4 h-4 text-slate-500" />
+              </a>
+              <div className="flex items-center gap-2">
+                <h1 className="text-lg font-semibold text-slate-900">
+                  {isEditMode ? '编辑文章' : 'AI 创作'}
+                </h1>
+                {newsSource && (
+                  <span className="px-2 py-0.5 rounded-md bg-orange-50 text-orange-600 text-xs font-medium">
+                    📰 {newsSource.source || '热点'}
+                  </span>
+                )}
+              </div>
             </div>
-            <span className={`font-medium ${step === s.id ? 'text-indigo-600' : 'text-slate-500'}`}>
-              {s.label}
-            </span>
-            {index < 3 && <ChevronRight size={20} className="text-slate-400" />}
-          </div>
-        ))}
-      </div>
-
-      {/* Step 1: Input Topic */}
-      {step === 'input' && (
-        <div className="bg-gradient-to-br from-[#f0f9f4]/90 via-white/90 to-[#f5f0ff]/90 backdrop-blur-xl rounded-2xl border border-slate-200 p-6 space-y-6 shadow-sm">
-          <div>
-            <label className="block text-sm font-medium mb-3 text-slate-700">选择AI模型</label>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {aiModels.map((model) => (
+            
+            {step === 'preview' && (
+              <div className="flex items-center gap-2">
                 <button
-                  key={model.id}
-                  onClick={() => setAiModel(model.id)}
-                  className={`p-4 rounded-xl border-2 transition-all hover:scale-102 ${
-                    aiModel === model.id 
-                      ? `${model.borderColor} ${model.bgColor} shadow-lg shadow-indigo-500/10` 
-                      : 'border-slate-200 hover:border-indigo-300 bg-white'
-                  }`}
+                  onClick={handleManualQualityCheck}
+                  disabled={isSaving || isQualityChecking}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-50 text-emerald-700 text-sm font-medium hover:bg-emerald-100 disabled:opacity-50 transition-colors"
                 >
-                  <div className="text-2xl mb-2">{model.icon}</div>
-                  <div className="font-medium mb-1 text-slate-900">{model.name}</div>
-                  <div className="text-xs text-slate-500">{model.description}</div>
+                  {isQualityChecking ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
+                  质检
                 </button>
-              ))}
-            </div>
+                <button onClick={handleSaveDraft} disabled={isSaving} className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-100 text-slate-700 text-sm font-medium hover:bg-slate-200 disabled:opacity-50 transition-colors">
+                  <Save className="w-4 h-4" />
+                  保存
+                </button>
+                <button onClick={handlePublish} disabled={isSaving} className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-violet-500 text-white text-sm font-medium hover:bg-violet-600 disabled:opacity-50 transition-colors">
+                  <Send className="w-4 h-4" />
+                  发布
+                </button>
+              </div>
+            )}
           </div>
+        </div>
+      </header>
 
-          <div>
-            <label className="block text-sm font-medium mb-3 text-slate-700">输入主题/关键词</label>
-            <textarea
-              value={topic}
-              onChange={(e) => setTopic(e.target.value)}
-              placeholder="例如：AI大模型最新进展分析"
-              className="w-full h-32 p-4 rounded-xl bg-white/80 border border-slate-300 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 resize-none text-slate-800 placeholder-slate-400"
-            />
-          </div>
-
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <label className="block text-sm font-medium text-slate-700">写作风格</label>
-              <span className="text-xs text-slate-500">选择适合目标读者的风格</span>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {writingStyles.map((style) => (
-                <button
-                  key={style.id}
-                  type="button"
-                  onClick={() => setWritingStyle(style.id)}
-                  className={`writing-style-btn p-4 rounded-xl border-2 transition-all text-left group cursor-pointer ${
-                    writingStyle === style.id
-                      ? `border-indigo-400 bg-gradient-to-r ${style.color} bg-opacity-10 shadow-lg pointer-events-auto`
-                      : 'border-slate-200 hover:border-indigo-300 bg-white hover:shadow-md pointer-events-auto'
-                  }`}
-                  style={{ pointerEvents: 'auto' }}
-                >
-                  <div className="flex items-start justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      <span className="text-2xl">{style.icon}</span>
-                      <div className="font-medium text-slate-900">{style.name}</div>
-                    </div>
-                    <div className="flex gap-1">
-                      {style.tags?.map((tag, idx) => (
-                        <span 
-                          key={idx} 
-                          className={`text-[10px] px-1.5 py-0.5 rounded-full ${
-                            writingStyle === style.id 
-                              ? 'bg-white/80 text-indigo-600' 
-                              : 'bg-indigo-50 text-indigo-500'
-                          }`}
-                        >
-                          {tag}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="text-xs text-slate-500 mb-2">{style.description}</div>
-                  <div className={`text-xs italic p-2 rounded ${
-                    writingStyle === style.id ? 'bg-white/60 text-slate-700' : 'bg-slate-50 text-slate-600'
+      <main className="max-w-4xl mx-auto px-6 py-6">
+        {/* 步骤指示器 */}
+        {step === 'preview' && (
+          <div className="flex items-center gap-1.5 mb-6">
+            {[
+              { id: 'input', label: '主题' },
+              { id: 'titles', label: '标题' },
+              { id: 'preview', label: '编辑' },
+            ].map((s, index, arr) => {
+              const isActive = step === s.id
+              const isCompleted = arr.findIndex(x => x.id === step) > index
+              return (
+                <div key={s.id} className="flex items-center">
+                  <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                    isActive ? 'bg-violet-500 text-white' :
+                    isCompleted ? 'bg-emerald-500 text-white' : 'bg-slate-100 text-slate-400'
                   }`}>
-                    "{style.example}"
+                    {isCompleted && <Check className="w-3.5 h-3.5" />}
+                    {s.label}
                   </div>
-                </button>
-              ))}
-            </div>
+                  {index < arr.length - 1 && (
+                    <div className={`w-4 h-0.5 mx-1 ${isCompleted ? 'bg-emerald-500' : 'bg-slate-200'}`} />
+                  )}
+                </div>
+              )
+            })}
           </div>
+        )}
 
-          <div className="flex items-center gap-4">
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input 
-                type="checkbox" 
-                className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" 
-                checked={generateCoverImage}
-                onChange={(e) => setGenerateCoverImage(e.target.checked)}
-              />
-              <span className="text-sm text-slate-700">生成技术配图</span>
-            </label>
-          </div>
-
-          {generateCoverImage && (
-            <div>
-              <label className="block text-sm font-medium mb-3 text-slate-700">选择图片生成模型</label>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                {imageProviders.map((provider) => (
+        {/* 输入步骤 */}
+        {step === 'input' && (
+          <div className="space-y-4">
+            {/* AI 模型选择 */}
+            <div className="bg-white rounded-2xl border border-slate-200 p-5">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center">
+                  <Sparkles className="w-4 h-4 text-white" />
+                </div>
+                <div>
+                  <h3 className="font-medium text-slate-900">AI 模型</h3>
+                  <p className="text-xs text-slate-500">选择智能写作引擎</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                {aiModels.map((model) => (
                   <button
-                    key={provider.id}
-                    onClick={() => setImageProvider(provider.id)}
-                    className={`p-4 rounded-xl border-2 transition-all hover:scale-102 ${
-                      imageProvider === provider.id 
-                        ? `${provider.borderColor} ${provider.bgColor} shadow-lg shadow-indigo-500/10` 
-                        : 'border-slate-200 hover:border-indigo-300 bg-white'
+                    key={model.id}
+                    onClick={() => setAiModel(model.id)}
+                    className={`p-3 rounded-xl border-2 text-center transition-all ${
+                      aiModel === model.id 
+                        ? 'border-violet-500 bg-violet-50' 
+                        : 'border-slate-100 hover:border-slate-200'
                     }`}
                   >
-                    <div className="text-2xl mb-2">{provider.icon}</div>
-                    <div className="font-medium mb-1 text-slate-900">{provider.name}</div>
-                    <div className="text-xs text-slate-500">{provider.description}</div>
+                    <div className="text-xl mb-1">{model.icon}</div>
+                    <div className="text-sm font-medium text-slate-900">{model.name}</div>
+                    <div className="text-xs text-slate-400">{model.desc}</div>
                   </button>
                 ))}
               </div>
             </div>
-          )}
 
-          <button
-            onClick={handleGenerateTitles}
-            disabled={!topic || isGenerating}
-            className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl hover:shadow-lg hover:shadow-indigo-500/30 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
-          >
-            {isGenerating ? (
-              <>
-                <Loader2 size={20} className="animate-spin" />
-                生成中...
-              </>
-            ) : (
-              <>
-                <Wand2 size={20} />
-                生成标题
-              </>
+            {generationError && (
+              <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+                {generationError}
+              </div>
             )}
-          </button>
-        </div>
-      )}
 
-      {/* Step 2: Select Title */}
-      {step === 'titles' && (
-        <div className="bg-gradient-to-br from-[#f0f9f4]/90 via-white/90 to-[#f5f0ff]/90 backdrop-blur-xl rounded-2xl border border-slate-200 p-6 space-y-6 shadow-sm">
-          <div className="flex items-center justify-between">
-            <h2 className="text-xl font-semibold text-slate-900">选择标题</h2>
-            <button
-              onClick={handleGenerateTitles}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-300 hover:bg-slate-50 transition-colors text-slate-700"
-            >
-              <RefreshCw size={20} />
-              重新生成
-            </button>
-          </div>
-
-          <div className="space-y-4">
-            {generatedTitles.map((item) => (
-              <button
-                key={item.id}
-                onClick={() => handleSelectTitle(item.title)}
-                className="w-full p-4 rounded-xl border-2 border-slate-200 hover:border-indigo-300 transition-all text-left group bg-white hover:scale-102"
-              >
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex-1">
-                    <div className="font-medium mb-2 text-slate-900 group-hover:text-indigo-600 transition-colors">
-                      {item.title}
-                    </div>
-                    <div className="flex items-center gap-2 text-sm text-slate-500">
-                      <Sparkles size={16} className="text-indigo-500" />
-                      预测点击率: {item.predictedClickRate}%
-                    </div>
-                  </div>
-                  <div className={`px-3 py-1 rounded-full text-sm font-medium ${
-                    item.predictedClickRate >= 80 ? 'bg-emerald-100 text-emerald-700' :
-                    item.predictedClickRate >= 70 ? 'bg-amber-100 text-amber-700' :
-                    'bg-slate-100 text-slate-700'
-                  }`}>
-                    {item.predictedClickRate >= 80 ? '优秀' :
-                     item.predictedClickRate >= 70 ? '良好' : '一般'}
-                  </div>
+            {/* 写作风格 */}
+            <div className="bg-white rounded-2xl border border-slate-200 p-5">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-orange-400 to-pink-500 flex items-center justify-center">
+                  <PenTool className="w-4 h-4 text-white" />
                 </div>
-              </button>
-            ))}
-          </div>
-
-          <button
-            onClick={() => setStep('input')}
-            className="w-full flex items-center justify-center gap-2 px-6 py-3 rounded-xl border border-slate-300 hover:bg-slate-50 transition-colors text-slate-700"
-          >
-            返回修改
-          </button>
-        </div>
-      )}
-
-      {/* Step 3: Generate Content */}
-      {step === 'content' && (
-        <div className="bg-gradient-to-br from-[#f0f9f4]/90 via-white/90 to-[#f5f0ff]/90 backdrop-blur-xl rounded-2xl border border-slate-200 p-6 space-y-6 shadow-sm">
-          <div className="text-center py-12">
-            {isGenerating ? (
-              <>
-                <Loader2 size={48} className="mx-auto mb-4 text-indigo-600 animate-spin" />
-                <h2 className="text-xl font-semibold mb-2 text-slate-900">正在生成内容...</h2>
-                <p className="text-slate-600">AI正在为您创作高质量内容，请稍候</p>
-              </>
-            ) : (
-              <>
-                <div className="w-16 h-16 rounded-full bg-gradient-to-br from-indigo-500/10 to-purple-500/10 flex items-center justify-center mx-auto mb-4">
-                  <Sparkles size={32} className="text-indigo-600" />
+                <div>
+                  <h3 className="font-medium text-slate-900">写作风格</h3>
+                  <p className="text-xs text-slate-500">选择内容风格</p>
                 </div>
-                <h2 className="text-xl font-semibold mb-2 text-slate-900">准备就绪</h2>
-                <p className="text-slate-600 mb-6">已选择标题：{selectedTitle}</p>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                {writingStyles.map((style) => (
+                  <button
+                    key={style.id}
+                    onClick={() => setWritingStyle(style.id)}
+                    className={`p-3 rounded-xl border-2 text-center transition-all ${
+                      writingStyle === style.id 
+                        ? 'border-violet-500 bg-violet-50' 
+                        : 'border-slate-100 hover:border-slate-200'
+                    }`}
+                  >
+                    <div className="text-xl mb-1">{style.icon}</div>
+                    <div className="text-sm font-medium text-slate-900">{style.name}</div>
+                    <div className="text-xs text-slate-400">{style.desc}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* 主题输入 */}
+            <div className="bg-white rounded-2xl border border-slate-200 p-5">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-400 to-cyan-500 flex items-center justify-center">
+                  <Type className="w-4 h-4 text-white" />
+                </div>
+                <div>
+                  <h3 className="font-medium text-slate-900">文章主题</h3>
+                  <p className="text-xs text-slate-500">输入想要创作的内容方向</p>
+                </div>
+              </div>
+              <textarea
+                value={topic}
+                onChange={(e) => setTopic(e.target.value)}
+                placeholder="例如：AI大模型在内容创作领域的最新应用..."
+                className="w-full h-28 px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 placeholder-slate-400 focus:outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100 resize-none text-sm leading-relaxed"
+              />
+              <div className="mt-4 flex justify-end">
                 <button
-                  onClick={handleGenerateContent}
-                  className="flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl hover:shadow-lg hover:shadow-indigo-500/30 transition-all duration-300"
+                  onClick={handleGenerateTitles}
+                  disabled={isGenerating || !topic.trim()}
+                  className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-violet-500 to-purple-600 text-white text-sm font-medium hover:opacity-90 disabled:opacity-50 transition-opacity"
                 >
-                  <Wand2 size={20} />
-                  开始生成内容
+                  {isGenerating ? (
+                    <><Loader2 className="w-4 h-4 animate-spin" /> 生成中...</>
+                  ) : (
+                    <><Sparkles className="w-4 h-4" /> 生成标题</>
+                  )}
                 </button>
-              </>
-            )}
+              </div>
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Step 4: Preview */}
-      {step === 'preview' && generatedContent && (
-        <div className="space-y-6">
-          <div className="bg-gradient-to-br from-[#f0f9f4]/90 via-white/90 to-[#f5f0ff]/90 backdrop-blur-xl rounded-2xl border border-slate-200 p-6 shadow-sm">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-xl font-semibold text-slate-900">内容预览</h2>
+        {/* 标题选择步骤 */}
+        {step === 'titles' && (
+          <div className="bg-white rounded-2xl border border-slate-200 p-5">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center">
+                  <FileText className="w-4 h-4 text-white" />
+                </div>
+                <div>
+                  <h3 className="font-medium text-slate-900">选择标题</h3>
+                  <p className="text-xs text-slate-500">可勾选 1~2 个标题，生成单篇或 A/B 双版本</p>
+                </div>
+              </div>
               <div className="flex items-center gap-2">
-                <button className="flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-300 hover:bg-slate-50 transition-colors text-slate-700">
-                  <Copy size={20} />
-                  复制
+                <button
+                  onClick={handleScoreSelectedTitles}
+                  disabled={isScoringTitle || selectedTitleCandidates.length === 0}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-emerald-700 bg-emerald-50 hover:bg-emerald-100 disabled:opacity-50"
+                >
+                  {isScoringTitle ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ShieldCheck className="w-3.5 h-3.5" />}
+                  智能评分
                 </button>
-                <button className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl hover:shadow-lg hover:shadow-indigo-500/30 transition-all duration-300">
-                  <Wand2 size={20} />
-                  优化内容
+                <button
+                  onClick={handleGenerateTitles}
+                  disabled={isGenerating}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-violet-600 bg-violet-50 hover:bg-violet-100 disabled:opacity-50"
+                >
+                  {isGenerating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                  重新生成
+                </button>
+                <button onClick={() => setStep('input')} className="px-3 py-1.5 rounded-lg text-sm text-slate-500 hover:bg-slate-100">
+                  返回修改
                 </button>
               </div>
             </div>
 
-            <div className="space-y-6">
-              {/* Title */}
-              <div>
-                <label className="block text-sm font-medium mb-2 text-slate-700">标题</label>
-                <input
-                  type="text"
-                  value={generatedContent.title}
-                  onChange={(e) => setGeneratedContent({...generatedContent, title: e.target.value})}
-                  className="w-full p-3 rounded-xl bg-white/80 border border-slate-300 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 text-slate-800"
-                />
+            <div className="mb-3 flex items-center gap-2 text-xs">
+              <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-600">
+                已选择 {selectedTitleCandidates.length} / 2
+              </span>
+              {selectedTitleCandidates.map((title, index) => (
+                <span key={title} className="px-2 py-0.5 rounded-md bg-violet-50 text-violet-600">
+                  {index === 0 ? 'A' : 'B'} · {title}
+                </span>
+              ))}
+            </div>
+            
+            <div className="space-y-2">
+              {generatedTitles.map((item, index) => (
+                <button
+                  key={index}
+                  onClick={() => handleSelectTitle(item.title)}
+                  disabled={isGenerating}
+                  className={`group w-full p-4 rounded-xl border transition-all text-left ${
+                    selectedTitleCandidates.includes(item.title)
+                      ? 'border-violet-300 bg-violet-50/50'
+                      : 'border-slate-100 hover:border-violet-300 hover:bg-violet-50/50'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-7 h-7 rounded-lg bg-violet-100 text-violet-600 flex items-center justify-center font-medium text-sm">
+                      {index + 1}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h4 className="text-sm font-medium text-slate-900 group-hover:text-violet-600 truncate">
+                        {item.title}
+                      </h4>
+                      <p className="text-xs text-slate-500 mt-0.5 truncate">{item.reason}</p>
+                    </div>
+                    {selectedTitleCandidates.includes(item.title) && (
+                      <div className="px-2 py-1 rounded-md text-xs font-medium bg-violet-100 text-violet-700">
+                        {selectedTitleCandidates.indexOf(item.title) === 0 ? 'A' : 'B'}
+                      </div>
+                    )}
+                    <div className={`px-2 py-1 rounded-md text-xs font-medium ${
+                      item.score >= 90 ? 'bg-emerald-50 text-emerald-600' :
+                      item.score >= 80 ? 'bg-blue-50 text-blue-600' :
+                      'bg-amber-50 text-amber-600'
+                    }`}>
+                      {item.score}分
+                    </div>
+                    <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-violet-500 transition-colors" />
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            <div className="mt-4 flex justify-end">
+              <button
+                onClick={generateContentFromCandidates}
+                disabled={isGenerating || selectedTitleCandidates.length === 0}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-violet-500 to-purple-600 text-white text-sm font-medium hover:opacity-90 disabled:opacity-50"
+              >
+                {isGenerating ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    生成中...
+                  </>
+                ) : (
+                  <>
+                    <Wand2 className="w-4 h-4" />
+                    {selectedTitleCandidates.length === 1 ? '生成正文' : '生成 A/B 双版本'}
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* 预览编辑步骤 */}
+        {step === 'preview' && generatedContent && (
+          <div className="space-y-4">
+            {/* 基本信息 */}
+            <div className="bg-white rounded-2xl border border-slate-200 p-5">
+              <div className="flex items-center gap-2 mb-4">
+                <FileText className="w-4 h-4 text-slate-400" />
+                <label className="text-sm font-medium text-slate-500">文章标题</label>
+              </div>
+              <input
+                type="text"
+                value={generatedContent.title}
+                onChange={(e) => handleTitleChange(e.target.value)}
+                className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 font-semibold text-lg focus:outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+              />
+
+              <div className="mt-3 flex items-center gap-2">
+                <button
+                  onClick={handleScoreCurrentTitle}
+                  disabled={isScoringTitle}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm bg-emerald-50 text-emerald-700 hover:bg-emerald-100 disabled:opacity-50"
+                >
+                  {isScoringTitle ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ShieldCheck className="w-3.5 h-3.5" />}
+                  标题评分
+                </button>
+
+                <button
+                  onClick={handleOptimizeCurrentTitle}
+                  disabled={isScoringTitle}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm bg-violet-50 text-violet-700 hover:bg-violet-100 disabled:opacity-50"
+                >
+                  {isScoringTitle ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                  一键优化标题
+                </button>
+
+                {activeTitleScore && (
+                  <div className="flex items-center gap-2 text-xs text-slate-600">
+                    <span className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700">
+                      评分 {Math.round(activeTitleScore.score)}
+                    </span>
+                    <span className="px-2 py-0.5 rounded-md bg-blue-50 text-blue-700">
+                      点击率 {Math.round(activeTitleScore.click_rate)}%
+                    </span>
+                    <span className="text-slate-500 truncate max-w-[360px]">{activeTitleScore.analysis}</span>
+                  </div>
+                )}
               </div>
 
-              {/* Summary */}
-              <div>
-                <label className="block text-sm font-medium mb-2 text-slate-700">摘要</label>
-                <textarea
-                  value={generatedContent.summary}
-                  onChange={(e) => setGeneratedContent({...generatedContent, summary: e.target.value})}
-                  className="w-full h-24 p-3 rounded-xl bg-white/80 border border-slate-300 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 resize-none text-slate-800"
-                />
+              {(activeTitleScore?.suggestions?.length ?? 0) > 0 && (
+                <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+                  {(activeTitleScore?.suggestions ?? []).slice(0, 3).map((item) => (
+                    <span key={item} className="px-2 py-1 rounded-md bg-slate-100 text-slate-600">
+                      {item}
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {contentVariants.length > 1 && (
+                <div className="mt-4 rounded-xl border border-violet-100 bg-violet-50/50 p-3">
+                  <div className="text-xs text-violet-700 mb-2">已生成标题 A/B 两个版本，可快速切换对比</div>
+                  <div className="flex flex-wrap gap-2">
+                    {contentVariants.map((variant) => (
+                      <button
+                        key={variant.key}
+                        onClick={() => handleVariantSwitch(variant.key)}
+                        className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                          activeVariantKey === variant.key
+                            ? 'bg-violet-500 text-white'
+                            : 'bg-white text-violet-700 border border-violet-200 hover:bg-violet-100'
+                        }`}
+                      >
+                        {variant.key} 版 · {variant.title}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                {/* 封面图 */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <ImageIcon className="w-4 h-4 text-slate-400" />
+                      <label className="text-sm text-slate-500">封面图</label>
+                    </div>
+                    {isEditMode && (
+                      <button
+                        onClick={async () => {
+                          if (!confirm('确定要重新生成封面图吗？') || !editArticleId) return
+                          setIsGenerating(true)
+                          try {
+                            const result = await fetch(`${API_URL}/api/articles/${editArticleId}/generate-cover`, {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ topic: generatedContent.title, style: 'professional' })
+                            })
+                            if (result.ok) {
+                              const data = await result.json()
+                              setCoverImageUrl(data.cover_image_url)
+                              alert('封面图生成成功！')
+                            } else { alert('生成失败') }
+                          } catch (error) { alert('生成失败') }
+                          finally { setIsGenerating(false) }
+                        }}
+                        disabled={isGenerating}
+                        className="flex items-center gap-1 px-2 py-1 rounded-lg bg-violet-50 text-violet-600 text-xs font-medium hover:bg-violet-100"
+                      >
+                        {isGenerating ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                        重新生成
+                      </button>
+                    )}
+                  </div>
+                  {coverImageUrl ? (
+                    <div className="relative group rounded-xl overflow-hidden h-32">
+                      <img src={coverImageUrl.startsWith('http') ? coverImageUrl : `${API_URL}/${coverImageUrl}`} alt="封面" className="w-full h-full object-cover" />
+                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                        <button onClick={() => setCoverImageUrl('')} className="px-3 py-1.5 rounded-lg bg-white text-red-500 text-xs font-medium">删除</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="h-32 rounded-xl bg-slate-50 border-2 border-dashed border-slate-200 flex flex-col items-center justify-center gap-1">
+                      <ImageIcon className="w-6 h-6 text-slate-300" />
+                      <p className="text-xs text-slate-400">暂无封面</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* 摘要 */}
+                <div>
+                  <div className="flex items-center gap-2 mb-2">
+                    <BarChart3 className="w-4 h-4 text-slate-400" />
+                    <label className="text-sm text-slate-500">文章摘要</label>
+                  </div>
+                  <textarea
+                    value={generatedContent.summary || ''}
+                    onChange={(e) => handleSummaryChange(e.target.value)}
+                    placeholder="输入文章摘要..."
+                    className="w-full h-32 px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-700 text-sm resize-none focus:outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* 正文内容 */}
+            <div className="bg-white rounded-2xl border border-slate-200 p-5">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <PenTool className="w-4 h-4 text-slate-400" />
+                  <label className="text-sm font-medium text-slate-500">正文内容</label>
+                </div>
+                <div className="inline-flex items-center rounded-lg border border-slate-200 p-1 bg-slate-50">
+                  <button
+                    onClick={() => setEditorMode('plain')}
+                    className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+                      editorMode === 'plain' ? 'bg-white text-slate-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                    }`}
+                  >
+                    Markdown
+                  </button>
+                  <button
+                    onClick={() => setEditorMode('rich')}
+                    className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+                      editorMode === 'rich' ? 'bg-white text-slate-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                    }`}
+                  >
+                    富文本
+                  </button>
+                </div>
               </div>
 
-              {/* Content */}
-              <div>
-                <label className="block text-sm font-medium mb-2 text-slate-700">正文内容</label>
+              {editorMode === 'rich' ? (
+                <RichEditor
+                  content={editingContent}
+                  onChange={handleContentChange}
+                />
+              ) : (
                 <textarea
                   value={editingContent}
-                  onChange={(e) => setEditingContent(e.target.value)}
-                  className="w-full h-96 p-3 rounded-xl bg-white/80 border border-slate-300 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 resize-none font-mono text-sm text-slate-800"
+                  onChange={(e) => handleContentChange(e.target.value)}
+                  className="w-full h-96 px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-700 resize-none font-mono text-sm leading-relaxed focus:outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
                 />
-              </div>
+              )}
+            </div>
 
-              {/* Quality Score */}
-              <div className="flex items-center justify-between p-4 rounded-xl bg-gradient-to-br from-indigo-50/50 to-purple-50/50 border border-indigo-200">
+            {/* 质量评分 */}
+            {generatedContent.qualityScore && (
+              <div className="bg-gradient-to-r from-violet-50 to-purple-50 rounded-2xl p-4 border border-violet-100">
                 <div className="flex items-center gap-4">
-                  <div className="text-center">
-                    <div className="text-3xl font-bold text-indigo-600">{generatedContent.qualityScore}</div>
-                    <div className="text-sm text-slate-600">质量评分</div>
-                  </div>
-                  <div className="h-12 w-px bg-slate-300" />
-                  <div>
-                    <div className="text-sm text-slate-600 mb-1">参考来源</div>
-                    <div className="flex flex-wrap gap-2">
-                      {generatedContent.sources.map((source: string, index: number) => (
-                        <span key={index} className="px-2 py-1 rounded bg-indigo-100 text-indigo-700 text-xs font-medium">
-                          {source}
-                        </span>
-                      ))}
+                  <div className="text-center min-w-[60px]">
+                    <div className={`text-3xl font-bold ${getScoreColor(generatedContent.qualityScore)}`}>
+                      {generatedContent.qualityScore}
                     </div>
+                    <div className="text-xs text-slate-500 mt-0.5 font-medium">质量分</div>
+                  </div>
+                  <div className="flex-1">
+                    <div className="h-2 bg-white/60 rounded-full overflow-hidden">
+                      <div className={`h-full ${getScoreBgColor(generatedContent.qualityScore)} rounded-full transition-all`} style={{ width: `${generatedContent.qualityScore}%` }} />
+                    </div>
+                    <p className="text-xs text-slate-600 mt-2">
+                      {generatedContent.qualityScore >= 90 ? '质量优秀，可直接发布' :
+                       generatedContent.qualityScore >= 80 ? '质量良好，建议微调' :
+                       generatedContent.qualityScore >= 70 ? '质量尚可，建议优化' : '需要进一步修改'}
+                    </p>
                   </div>
                 </div>
               </div>
-            </div>
-          </div>
+            )}
 
-          <div className="flex items-center gap-4">
-            <button
-              onClick={() => setStep('input')}
-              disabled={isSaving}
-              className="flex-1 flex items-center justify-center gap-2 px-6 py-3 rounded-xl border border-slate-300 hover:bg-slate-50 transition-colors text-slate-700 disabled:opacity-50"
-            >
-              重新生成
-            </button>
-            <button
-              onClick={handleSaveDraft}
-              disabled={isSaving}
-              className="flex-1 flex items-center justify-center gap-2 px-6 py-3 border border-slate-300 hover:bg-slate-50 transition-colors text-slate-700 disabled:opacity-50"
-            >
-              {isSaving ? <Loader2 size={20} className="animate-spin" /> : <Save size={20} />}
-              保存草稿
-            </button>
-            <button
-              onClick={handlePublish}
-              disabled={isSaving}
-              className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white rounded-xl hover:shadow-lg hover:shadow-emerald-500/30 transition-all duration-300 disabled:opacity-50"
-            >
-              {isSaving ? <Loader2 size={20} className="animate-spin" /> : <Send size={20} />}
-              直接发布
-            </button>
+            {qualityCheck && (
+              <div className={`rounded-2xl border p-4 ${qualityCheck.pass ? 'bg-emerald-50 border-emerald-100' : 'bg-amber-50 border-amber-100'}`}>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    {qualityCheck.pass ? (
+                      <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                    ) : (
+                      <ShieldAlert className="w-4 h-4 text-amber-600" />
+                    )}
+                    <p className="text-sm font-medium text-slate-800">
+                      {qualityCheck.pass ? '发布前质检已通过' : '发布前质检待处理'}
+                    </p>
+                  </div>
+                  <p className="text-xs text-slate-500">
+                    {new Date(qualityCheck.checkedAt).toLocaleString('zh-CN')}
+                  </p>
+                </div>
+
+                {qualityCheck.titleScore && (
+                  <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+                    <span className="px-2 py-0.5 rounded-md bg-white text-slate-700 border border-slate-200">
+                      标题评分 {Math.round(qualityCheck.titleScore.score)}
+                    </span>
+                    <span className="px-2 py-0.5 rounded-md bg-white text-slate-700 border border-slate-200">
+                      预估点击率 {Math.round(qualityCheck.titleScore.click_rate)}%
+                    </span>
+                    <span className="text-slate-600">{qualityCheck.titleScore.analysis}</span>
+                  </div>
+                )}
+
+                {qualityCheck.blockingIssues.length > 0 && (
+                  <div className="mt-3 space-y-1 text-sm text-rose-600">
+                    {qualityCheck.blockingIssues.map((issue) => (
+                      <p key={issue} className="flex items-start gap-1.5">
+                        <AlertTriangle className="w-3.5 h-3.5 mt-0.5" />
+                        <span>{issue}</span>
+                      </p>
+                    ))}
+                  </div>
+                )}
+
+                {qualityCheck.formatWarnings.length > 0 && (
+                  <div className="mt-3 space-y-1 text-xs text-amber-700">
+                    {qualityCheck.formatWarnings.map((warning) => (
+                      <p key={warning}>• {warning}</p>
+                    ))}
+                  </div>
+                )}
+
+                {qualityCheck.hasSensitive && qualityCheck.sensitiveCount > 0 && (
+                  <div className="mt-3 flex items-center justify-between gap-3 rounded-xl bg-white/70 border border-amber-200 px-3 py-2">
+                    <p className="text-xs text-amber-700">
+                      检测到 {qualityCheck.sensitiveCount} 处敏感词，建议自动替换后再发布。
+                    </p>
+                    <button
+                      onClick={applySensitiveReplacement}
+                      className="px-3 py-1 rounded-lg text-xs font-medium bg-amber-100 text-amber-700 hover:bg-amber-200"
+                    >
+                      一键替换
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
-        </div>
-      )}
+        )}
+      </main>
     </div>
   )
 }

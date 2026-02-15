@@ -16,7 +16,8 @@ from app.models import (
     Hotspot,
     Task, TaskType, TaskStatus,
     BatchJob, BatchJobType, BatchJobStatus,
-    AIProviderConfig
+    AIProviderConfig,
+    ImageProviderConfig
 )
 
 

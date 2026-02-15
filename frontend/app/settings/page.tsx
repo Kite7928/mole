@@ -1,226 +1,265 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Separator } from '@/components/ui/separator'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Badge } from '@/components/ui/badge'
-import { ConfigWizard } from '@/components/onboarding/config-wizard'
 import {
   Save,
   Key,
   Bot,
   Settings as SettingsIcon,
-  Database,
-  Image as ImageIcon,
-  CheckCircle2,
-  AlertCircle,
+  CheckCircle,
   Eye,
   EyeOff,
-  Zap,
+  Loader2,
+  MessageCircle,
+  Image as ImageIcon,
+  Plus,
+  Trash2,
+  TestTube,
+  Star,
+  Wand2,
+  RefreshCw
 } from 'lucide-react'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
+const defaultProviderTypes = [
+  { type: 'pollinations', name: 'Pollinations.ai', description: '完全免费，无需API Key', requires_config: false, recommended: true },
+  { type: 'pexels', name: 'Pexels', description: '免费高质量图库', requires_config: true, recommended: true },
+  { type: 'tongyi_wanxiang', name: '通义万相', description: '阿里云AI绘画，支持中文', requires_config: true, recommended: true },
+  { type: 'leonardo', name: 'Leonardo.ai', description: '每日150 tokens免费额度', requires_config: true, recommended: false },
+  { type: 'stable_diffusion', name: 'Stable Diffusion', description: '开源模型', requires_config: true, recommended: false },
+]
+
 export default function SettingsPage() {
   const [loading, setLoading] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [activeTab, setActiveTab] = useState('ai')
   const [showSecrets, setShowSecrets] = useState<Record<string, boolean>>({})
 
   const [config, setConfig] = useState({
-    // Application Config
-    appName: 'AI公众号自动写作助手 Pro',
-    appVersion: '1.0.0',
-    secretKey: '',
-
-    // LLM Config
-    openaiApiKey: '',
-    openaiBaseUrl: 'https://api.openai.com/v1',
-    openaiModel: 'gpt-4-turbo-preview',
-    openaiMaxTokens: 4000,
-    openaiTemperature: 0.7,
     deepseekApiKey: '',
     deepseekBaseUrl: 'https://api.deepseek.com/v1',
     deepseekModel: 'deepseek-chat',
-    claudeApiKey: '',
-    claudeBaseUrl: 'https://api.anthropic.com/v1',
-    claudeModel: 'claude-3-opus-20240229',
+    openaiApiKey: '',
+    openaiBaseUrl: 'https://api.openai.com/v1',
+    openaiModel: 'gpt-4-turbo-preview',
     geminiApiKey: '',
     geminiModel: 'gemini-pro',
-    qwenApiKey: '',
-    qwenBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    qwenModel: 'qwen-max',
-    moonshotApiKey: '',
-    moonshotBaseUrl: 'https://api.moonshot.cn/v1',
-    moonshotModel: 'moonshot-v1-8k',
-    ollamaBaseUrl: 'http://localhost:11434',
-    ollamaModel: 'llama2',
-    volcengineApiKey: '',
-    volcengineBaseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
-    volcengineModel: 'ep-20240110134838-xxxxx',
-    alibabaBailianApiKey: '',
-    alibabaBailianBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    alibabaBailianModel: 'qwen-max',
-    siliconflowApiKey: '',
-    siliconflowBaseUrl: 'https://api.siliconflow.cn/v1',
-    siliconflowModel: 'Qwen/Qwen2.5-7B-Instruct',
-    openrouterApiKey: '',
-    openrouterBaseUrl: 'https://openrouter.ai/api/v1',
-    openrouterModel: 'openai/gpt-4-turbo',
-    aiRotationStrategy: 'sequential',
-
-    // WeChat Config
     wechatAppId: '',
     wechatAppSecret: '',
-
-    // Database Config
-    databaseUrl: 'postgresql+asyncpg://postgres:postgres@postgres:5432/wechat_ai_writer',
-    redisUrl: 'redis://redis:6379/0',
-
-    // Task Config
-    celeryBrokerUrl: 'redis://redis:6379/1',
-    celeryResultBackend: 'redis://redis:6379/1',
-    taskTimeout: 3600,
-    taskMaxRetries: 3,
-
-    // File Storage Config
-    uploadDir: 'uploads',
-    tempDir: 'temp',
-    maxUploadSize: 20971520,
-
-    // Image Config
-    coverImageWidth: 1280,
-    coverImageHeight: 720,
-    coverImageMinWidth: 900,
-    coverImageMinHeight: 500,
-    imageMaxSize: 5242880,
-
-    // Logging Config
-    logLevel: 'INFO',
-    logFile: 'logs/app.log',
-
-    // Monitoring Config
-    enableMetrics: true,
-    metricsPort: 9090,
-    sentryDsn: '',
-
-    // Security Config
-    rateLimitEnabled: true,
-    rateLimitRequests: 100,
-    rateLimitPeriod: 60,
-
-    // Feature Config
-    enableResearch: true,
-    enableImageGeneration: true,
-    enableMarkdownEditor: true,
   })
 
-  // 保存从后端加载的原始配置
-  const [serverConfig, setServerConfig] = useState<any>(null)
+  const [imageProviders, setImageProviders] = useState<any[]>([])
+  const [providerTypes, setProviderTypes] = useState<any[]>(defaultProviderTypes)
+  const [showAddProvider, setShowAddProvider] = useState(false)
+  const [newProvider, setNewProvider] = useState({
+    provider_type: 'pollinations',
+    name: 'Pollinations.ai',
+    api_key: '',
+    is_default: false,
+    default_width: 900,
+    default_height: 500
+  })
 
-  const [saved, setSaved] = useState(false)
-
-  // 从后端加载配置
   useEffect(() => {
-    const loadConfig = async () => {
-      try {
-        const response = await fetch(`${API_URL}/api/config`)
-        if (response.ok) {
-          const data = await response.json()
-          if (data.success && data.config) {
-            const configData = data.config
-            // 保存原始配置到 serverConfig
-            setServerConfig(configData)
-
-            // 根据后端配置更新前端状态
-            setConfig((prev) => ({
-              ...prev,
-              // DeepSeek 配置
-              deepseekApiKey: configData.api_key || prev.deepseekApiKey,
-              deepseekBaseUrl: configData.base_url || prev.deepseekBaseUrl,
-              deepseekModel: configData.model || prev.deepseekModel,
-              // 微信配置
-              wechatAppId: configData.wechat_app_id || prev.wechatAppId,
-              wechatAppSecret: configData.wechat_app_secret || prev.wechatAppSecret,
-            }))
-          }
-        }
-      } catch (error) {
-        console.error('加载配置失败:', error)
-      }
-    }
     loadConfig()
+    loadImageProviders()
   }, [])
 
-  const toggleSecret = (key: string) => {
-    setShowSecrets((prev) => ({ ...prev, [key]: !prev[key] }))
+  const loadConfig = async () => {
+    try {
+      const response = await fetch(`${API_URL}/api/config`)
+      if (response.ok) {
+        const data = await response.json()
+        if (data.config) {
+          setConfig(prev => ({
+            ...prev,
+            deepseekApiKey: data.config.api_key || '',
+            deepseekBaseUrl: data.config.base_url || prev.deepseekBaseUrl,
+            deepseekModel: data.config.model || prev.deepseekModel,
+            wechatAppId: data.config.wechat_app_id || '',
+            wechatAppSecret: data.config.wechat_app_secret || '',
+          }))
+        }
+      }
+    } catch (error) {
+      console.error('加载配置失败:', error)
+    }
+  }
+
+  const loadImageProviders = async () => {
+    try {
+      const localConfigs = localStorage.getItem('image_providers')
+      if (localConfigs) setImageProviders(JSON.parse(localConfigs))
+      
+      const response = await fetch(`${API_URL}/api/image-providers/configs`)
+      if (response.ok) {
+        const data = await response.json()
+        if (data.success && data.configs) {
+          setImageProviders(data.configs)
+          localStorage.setItem('image_providers', JSON.stringify(data.configs))
+        }
+      }
+    } catch (error) {
+      console.error('加载图片配置失败:', error)
+    }
+  }
+
+  const handleAddProvider = async () => {
+    setLoading(true)
+    try {
+      const providerType = providerTypes.find(p => p.type === newProvider.provider_type)
+      const apiConfig = providerType?.requires_config ? { api_key: newProvider.api_key } : {}
+      const width = newProvider.default_width || 900
+      const height = newProvider.default_height || 500
+
+      const response = await fetch(`${API_URL}/api/image-providers/configs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider_type: newProvider.provider_type,
+          name: newProvider.name || providerType?.name,
+          api_config: apiConfig,
+          default_params: { width, height },
+          is_default: newProvider.is_default,
+          priority: imageProviders.length
+        }),
+      })
+
+      if (!response.ok && response.status === 404) {
+        const localConfig = {
+          id: Date.now(),
+          provider_type: newProvider.provider_type,
+          name: newProvider.name || providerType?.name,
+          api_config: apiConfig,
+          default_params: { width, height },
+          is_default: newProvider.is_default,
+          is_enabled: true,
+          priority: imageProviders.length,
+        }
+        const updatedProviders = [...imageProviders, localConfig]
+        setImageProviders(updatedProviders)
+        localStorage.setItem('image_providers', JSON.stringify(updatedProviders))
+        setShowAddProvider(false)
+        setLoading(false)
+        return
+      }
+      
+      await loadImageProviders()
+      setShowAddProvider(false)
+    } catch (error) {
+      alert('添加失败')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleDeleteProvider = async (id: number) => {
+    if (!confirm('确定删除？')) return
+    setLoading(true)
+    try {
+      const response = await fetch(`${API_URL}/api/image-providers/configs/${id}`, { method: 'DELETE' })
+      if (!response.ok && response.status === 404) {
+        const updatedProviders = imageProviders.filter(p => p.id !== id)
+        setImageProviders(updatedProviders)
+        localStorage.setItem('image_providers', JSON.stringify(updatedProviders))
+        setLoading(false)
+        return
+      }
+      await loadImageProviders()
+    } catch (error) {
+      alert('删除失败')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleTestProvider = async (id: number) => {
+    setLoading(true)
+    try {
+      const response = await fetch(`${API_URL}/api/image-providers/configs/${id}/test`, { method: 'POST' })
+      if (!response.ok && response.status === 404) {
+        const provider = imageProviders.find(p => p.id === id)
+        alert(provider?.provider_type === 'pollinations' ? 'Pollinations 配置有效' : '配置已保存')
+        setLoading(false)
+        return
+      }
+      const result = await response.json()
+      alert(result.success ? '测试成功' : `失败：${result.message}`)
+    } catch (error) {
+      alert('测试失败')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleSetDefault = async (id: number) => {
+    setLoading(true)
+    try {
+      const response = await fetch(`${API_URL}/api/image-providers/configs/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_default: true }),
+      })
+      if (!response.ok && response.status === 404) {
+        const updatedProviders = imageProviders.map(p => ({ ...p, is_default: p.id === id }))
+        setImageProviders(updatedProviders)
+        localStorage.setItem('image_providers', JSON.stringify(updatedProviders))
+        setLoading(false)
+        return
+      }
+      await loadImageProviders()
+    } catch (error) {
+      alert('设置失败')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleQuickSetup = async () => {
+    setLoading(true)
+    try {
+      const response = await fetch(`${API_URL}/api/image-providers/quick-setup`, { method: 'POST' })
+      if (!response.ok && response.status === 404) {
+        const now = new Date().toISOString()
+        const localConfigs = [
+          { id: Date.now(), provider_type: 'pollinations', name: 'Pollinations.ai', api_config: {}, default_params: { width: 900, height: 500 }, is_default: true, is_enabled: true },
+          { id: Date.now() + 1, provider_type: 'pexels', name: 'Pexels', api_config: { api_key: '' }, default_params: { width: 900, height: 500 }, is_default: false, is_enabled: true },
+          { id: Date.now() + 2, provider_type: 'tongyi_wanxiang', name: '通义万相', api_config: { api_key: '' }, default_params: { width: 900, height: 500 }, is_default: false, is_enabled: true },
+        ]
+        setImageProviders(localConfigs)
+        localStorage.setItem('image_providers', JSON.stringify(localConfigs))
+        setLoading(false)
+        return
+      }
+      await loadImageProviders()
+    } catch (error) {
+      alert('快速设置失败')
+    } finally {
+      setLoading(false)
+    }
   }
 
   const handleSave = async () => {
     setLoading(true)
     try {
-      // 确定当前使用的 AI 提供商
-      let aiProvider = 'openai'
-      let apiKey = config.openaiApiKey
-      let baseUrl = config.openaiBaseUrl
-      let model = config.openaiModel
-
-      // 如果 DeepSeek API Key 已配置（非空），则使用 DeepSeek
-      if (config.deepseekApiKey) {
-        aiProvider = 'deepseek'
-        apiKey = config.deepseekApiKey
-        baseUrl = config.deepseekBaseUrl
-        model = config.deepseekModel
-      }
-
       const response = await fetch(`${API_URL}/api/config`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ai_provider: aiProvider,
-          api_key: apiKey,
-          base_url: baseUrl,
-          model: model,
+          ai_provider: config.deepseekApiKey ? 'deepseek' : 'openai',
+          api_key: config.deepseekApiKey || config.openaiApiKey,
+          base_url: config.deepseekApiKey ? config.deepseekBaseUrl : config.openaiBaseUrl,
+          model: config.deepseekApiKey ? config.deepseekModel : config.openaiModel,
           wechat_app_id: config.wechatAppId,
           wechat_app_secret: config.wechatAppSecret,
-          enable_auto_publish: false,
-          max_news_count: 20,
         }),
       })
-
-      if (!response.ok) {
-        throw new Error('保存配置失败')
-      }
-
-      const result = await response.json()
-      console.log('保存配置成功:', result)
-
-      // 重新加载配置以确保同步
-      const reloadResponse = await fetch(`${API_URL}/api/config`)
-      if (reloadResponse.ok) {
-        const reloadData = await reloadResponse.json()
-        if (reloadData.success && reloadData.config) {
-          setServerConfig(reloadData.config)
-
-          // 更新前端状态
-          setConfig((prev) => ({
-            ...prev,
-            deepseekApiKey: reloadData.config.api_key || prev.deepseekApiKey,
-            deepseekBaseUrl: reloadData.config.base_url || prev.deepseekBaseUrl,
-            deepseekModel: reloadData.config.model || prev.deepseekModel,
-            wechatAppId: reloadData.config.wechat_app_id || prev.wechatAppId,
-            wechatAppSecret: reloadData.config.wechat_app_secret || prev.wechatAppSecret,
-          }))
-        }
-      }
-
+      if (!response.ok) throw new Error('保存失败')
       setSaved(true)
       setTimeout(() => setSaved(false), 3000)
     } catch (error) {
-      console.error('Failed to save config:', error)
-      alert('保存配置失败，请检查网络连接')
+      alert('保存配置失败')
     } finally {
       setLoading(false)
     }
@@ -229,1351 +268,396 @@ export default function SettingsPage() {
   const handleTestConnection = async (type: string) => {
     setLoading(true)
     try {
-      let apiKey = ''
-      let baseUrl = ''
-      let model = ''
-
-      switch (type) {
-        case 'DeepSeek':
-          apiKey = config.deepseekApiKey
-          baseUrl = config.deepseekBaseUrl
-          model = config.deepseekModel
-          break
-        case 'OpenAI':
-          apiKey = config.openaiApiKey
-          baseUrl = config.openaiBaseUrl
-          model = config.openaiModel
-          break
-        default:
-          alert(`${type} 连接测试暂未实现`)
-          setLoading(false)
-          return
-      }
-
+      const apiKey = type === 'DeepSeek' ? config.deepseekApiKey : config.openaiApiKey
       if (!apiKey) {
         alert(`请先填写 ${type} 的 API Key`)
-        setLoading(false)
         return
       }
-
       const response = await fetch(`${API_URL}/api/config/test-api`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           api_key: apiKey,
-          base_url: baseUrl,
-          model: model,
+          base_url: type === 'DeepSeek' ? config.deepseekBaseUrl : config.openaiBaseUrl,
+          model: type === 'DeepSeek' ? config.deepseekModel : config.openaiModel,
         }),
       })
-
       const result = await response.json()
-      
-      if (result.success) {
-        alert(`${type} 连接测试成功！`)
-      } else {
-        alert(`${type} 连接测试失败：${result.message}`)
-      }
+      alert(result.success ? `${type} 连接成功` : `连接失败：${result.message}`)
     } catch (error) {
-      console.error('Test connection error:', error)
-      alert(`${type} 连接测试失败，请检查网络连接`)
+      alert('连接测试失败')
     } finally {
       setLoading(false)
     }
   }
 
-  const renderSecretInput = (
-    label: string,
-    value: string,
-    onChange: (value: string) => void,
-    placeholder: string,
-    key: string
-  ) => (
-    <div>
-      <label className="text-sm font-medium mb-2 block">{label}</label>
-      <div className="relative">
-        <input
-          type={showSecrets[key] ? 'text' : 'password'}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={placeholder}
-          className="w-full px-3 py-2 bg-input border border-border rounded-md pr-10"
-        />
-        <button
-          type="button"
-          onClick={() => toggleSecret(key)}
-          className="absolute right-3 top-1/2 transform -translate-y-1/2 text-muted-foreground hover:text-foreground"
-        >
-          {showSecrets[key] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-        </button>
-      </div>
-    </div>
-  )
+  const tabs = [
+    { id: 'ai', name: 'AI 模型', icon: Bot },
+    { id: 'image', name: '图片生成', icon: ImageIcon },
+    { id: 'wechat', name: '微信公众号', icon: MessageCircle },
+  ]
+
+  const inputClasses = "w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-sm focus:outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100 transition-all"
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="border-b border-border">
-        <div className="container mx-auto px-4 py-4">
+    <div className="min-h-screen bg-slate-50">
+      {/* 头部 */}
+      <div className="bg-white border-b border-slate-200 sticky top-0 z-30">
+        <div className="max-w-4xl mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary">
-                <SettingsIcon className="h-6 w-6 text-primary-foreground" />
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-slate-900 flex items-center justify-center">
+                <SettingsIcon className="w-5 h-5 text-white" />
               </div>
               <div>
-                <h1 className="text-xl font-bold">系统设置</h1>
-                <p className="text-sm text-muted-foreground">配置系统参数和API</p>
+                <h1 className="text-lg font-semibold text-slate-900">系统设置</h1>
+                <p className="text-xs text-slate-500">配置AI、图片和发布服务</p>
               </div>
             </div>
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center gap-3">
               {saved && (
-                <Badge variant="default" className="mr-2">
-                  <CheckCircle2 className="mr-1 h-3 w-3" />
+                <span className="flex items-center gap-1 text-emerald-600 text-sm font-medium">
+                  <CheckCircle className="w-4 h-4" />
                   已保存
-                </Badge>
+                </span>
               )}
-              <Button onClick={handleSave} disabled={loading}>
-                {loading ? (
-                  <>
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" />
-                    保存中
-                  </>
-                ) : (
-                  <>
-                    <Save className="mr-2 h-4 w-4" />
-                    保存配置
-                  </>
-                )}
-              </Button>
+              <button
+                onClick={handleSave}
+                disabled={loading}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-violet-500 text-white text-sm font-medium hover:bg-violet-600 disabled:opacity-50 transition-colors"
+              >
+                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                保存配置
+              </button>
             </div>
           </div>
         </div>
-      </header>
+      </div>
 
-      {/* Main Content */}
-      <main className="container mx-auto px-4 py-6">
-        {/* 配置向导 */}
-        <ConfigWizard />
-        
-        <Tabs defaultValue="llm" className="space-y-4">
-          <TabsList className="grid w-full grid-cols-9 overflow-x-auto">
-            <TabsTrigger value="llm">
-              <Bot className="mr-2 h-4 w-4" />
-              AI模型
-            </TabsTrigger>
-            <TabsTrigger value="wechat">
-              <Key className="mr-2 h-4 w-4" />
-              微信配置
-            </TabsTrigger>
-            <TabsTrigger value="database">
-              <Database className="mr-2 h-4 w-4" />
-              数据库
-            </TabsTrigger>
-            <TabsTrigger value="app">
-              <SettingsIcon className="mr-2 h-4 w-4" />
-              应用配置
-            </TabsTrigger>
-            <TabsTrigger value="task">
-              <Zap className="mr-2 h-4 w-4" />
-              任务配置
-            </TabsTrigger>
-            <TabsTrigger value="image">
-              <ImageIcon className="mr-2 h-4 w-4" />
-              图片配置
-            </TabsTrigger>
-            <TabsTrigger value="logging">
-              <CheckCircle2 className="mr-2 h-4 w-4" />
-              日志配置
-            </TabsTrigger>
-            <TabsTrigger value="security">
-              <AlertCircle className="mr-2 h-4 w-4" />
-              安全配置
-            </TabsTrigger>
-            <TabsTrigger value="features">
-              <SettingsIcon className="mr-2 h-4 w-4" />
-              功能开关
-            </TabsTrigger>
-          </TabsList>
+      <div className="max-w-4xl mx-auto px-6 py-6">
+        {/* 标签页 */}
+        <div className="flex gap-2 mb-6">
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors ${
+                activeTab === tab.id
+                  ? 'bg-slate-900 text-white'
+                  : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+              }`}
+            >
+              <tab.icon className="w-4 h-4" />
+              {tab.name}
+            </button>
+          ))}
+        </div>
 
-          {/* LLM Configuration */}
-          <TabsContent value="llm" className="space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>AI 模型配置</CardTitle>
-                <CardDescription>配置多个 AI 模型的 API 密钥和参数</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="bg-purple-50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-800 p-4 rounded-lg">
-                  <div className="flex items-start space-x-3">
-                    <Bot className="h-5 w-5 text-purple-600 dark:text-purple-400 mt-0.5" />
-                    <div>
-                      <h4 className="font-medium text-purple-900 dark:text-purple-100 mb-1">智能提示</h4>
-                      <p className="text-sm text-purple-700 dark:text-purple-300">你可以配置多个 AI 模型，系统会自动选择可用的模型进行内容生成。建议至少配置一个主要模型。</p>
-                    </div>
+        {/* AI 模型配置 */}
+        {activeTab === 'ai' && (
+          <div className="space-y-4">
+            {/* DeepSeek */}
+            <div className="bg-white rounded-2xl border border-slate-200 p-5">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-orange-100 flex items-center justify-center">
+                    <Bot className="w-4 h-4 text-orange-600" />
                   </div>
-                </div>
-
-                {/* OpenAI */}
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-2">
-                      <h3 className="text-lg font-semibold">OpenAI</h3>
-                      <Badge variant="default" className="text-xs">推荐</Badge>
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleTestConnection('OpenAI')}
-                    >
-                      测试连接
-                    </Button>
-                  </div>
-                  <div className="bg-muted/50 p-4 rounded-lg space-y-4">
-                    {renderSecretInput(
-                      'API Key',
-                      config.openaiApiKey,
-                      (value) => setConfig({ ...config, openaiApiKey: value }),
-                      'sk-...',
-                      'openaiApiKey'
-                    )}
-                    <div>
-                      <label className="text-sm font-medium mb-2 block">Base URL</label>
-                      <input
-                        type="text"
-                        value={config.openaiBaseUrl}
-                        onChange={(e) => setConfig({ ...config, openaiBaseUrl: e.target.value })}
-                        placeholder="https://api.openai.com/v1"
-                        className="w-full px-3 py-2 bg-input border border-border rounded-md focus:ring-2 focus:ring-primary focus:border-transparent"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-sm font-medium mb-2 block">Model</label>
-                      <select
-                        value={config.openaiModel}
-                        onChange={(e) => setConfig({ ...config, openaiModel: e.target.value })}
-                        className="w-full px-3 py-2 bg-input border border-border rounded-md focus:ring-2 focus:ring-primary focus:border-transparent"
-                      >
-                        <option value="gpt-4-turbo-preview">GPT-4 Turbo (推荐)</option>
-                        <option value="gpt-4">GPT-4</option>
-                        <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
-                      </select>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="text-sm font-medium mb-2 block">最大 Token 数</label>
-                        <input
-                          type="number"
-                          value={config.openaiMaxTokens}
-                          onChange={(e) => setConfig({ ...config, openaiMaxTokens: parseInt(e.target.value) })}
-                          className="w-full px-3 py-2 bg-input border border-border rounded-md"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-sm font-medium mb-2 block">温度 (0-2)</label>
-                        <input
-                          type="number"
-                          step="0.1"
-                          min="0"
-                          max="2"
-                          value={config.openaiTemperature}
-                          onChange={(e) => setConfig({ ...config, openaiTemperature: parseFloat(e.target.value) })}
-                          className="w-full px-3 py-2 bg-input border border-border rounded-md"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <Separator />
-
-                {/* DeepSeek */}
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-2">
-                      <h3 className="text-lg font-semibold">DeepSeek</h3>
-                      <Badge variant="secondary" className="text-xs">性价比高</Badge>
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleTestConnection('DeepSeek')}
-                    >
-                      测试连接
-                    </Button>
-                  </div>
-                  <div className="bg-muted/50 p-4 rounded-lg space-y-4">
-                    {renderSecretInput(
-                      'API Key',
-                      config.deepseekApiKey,
-                      (value) => setConfig({ ...config, deepseekApiKey: value }),
-                      'sk-...',
-                      'deepseekApiKey'
-                    )}
-                    <div>
-                      <label className="text-sm font-medium mb-2 block">Base URL</label>
-                      <input
-                        type="text"
-                        value={config.deepseekBaseUrl}
-                        onChange={(e) => setConfig({ ...config, deepseekBaseUrl: e.target.value })}
-                        placeholder="https://api.deepseek.com/v1"
-                        className="w-full px-3 py-2 bg-input border border-border rounded-md focus:ring-2 focus:ring-primary focus:border-transparent"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-sm font-medium mb-2 block">Model</label>
-                      <select
-                        value={config.deepseekModel}
-                        onChange={(e) => setConfig({ ...config, deepseekModel: e.target.value })}
-                        className="w-full px-3 py-2 bg-input border border-border rounded-md focus:ring-2 focus:ring-primary focus:border-transparent"
-                      >
-                        <option value="deepseek-chat">DeepSeek Chat</option>
-                        <option value="deepseek-coder">DeepSeek Coder</option>
-                      </select>
-                    </div>
-                  </div>
-                </div>
-
-                <Separator />
-
-                {/* Claude */}
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-2">
-                      <h3 className="text-lg font-semibold">Claude</h3>
-                      <Badge variant="secondary" className="text-xs">长文本</Badge>
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleTestConnection('Claude')}
-                    >
-                      测试连接
-                    </Button>
-                  </div>
-                  <div className="bg-muted/50 p-4 rounded-lg space-y-4">
-                    {renderSecretInput(
-                      'API Key',
-                      config.claudeApiKey,
-                      (value) => setConfig({ ...config, claudeApiKey: value }),
-                      'sk-ant-...',
-                      'claudeApiKey'
-                    )}
-                    <div>
-                      <label className="text-sm font-medium mb-2 block">Base URL</label>
-                      <input
-                        type="text"
-                        value={config.claudeBaseUrl}
-                        onChange={(e) => setConfig({ ...config, claudeBaseUrl: e.target.value })}
-                        placeholder="https://api.anthropic.com/v1"
-                        className="w-full px-3 py-2 bg-input border border-border rounded-md focus:ring-2 focus:ring-primary focus:border-transparent"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-sm font-medium mb-2 block">Model</label>
-                      <select
-                        value={config.claudeModel}
-                        onChange={(e) => setConfig({ ...config, claudeModel: e.target.value })}
-                        className="w-full px-3 py-2 bg-input border border-border rounded-md focus:ring-2 focus:ring-primary focus:border-transparent"
-                      >
-                        <option value="claude-3-opus-20240229">Claude 3 Opus (最强)</option>
-                        <option value="claude-3-sonnet-20240229">Claude 3 Sonnet (平衡)</option>
-                        <option value="claude-3-haiku-20240307">Claude 3 Haiku (快速)</option>
-                      </select>
-                    </div>
-                  </div>
-                </div>
-
-                <Separator />
-
-                {/* Gemini */}
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-2">
-                      <h3 className="text-lg font-semibold">Gemini</h3>
-                      <Badge variant="outline" className="text-xs">Google</Badge>
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleTestConnection('Gemini')}
-                    >
-                      测试连接
-                    </Button>
-                  </div>
-                  <div className="bg-muted/50 p-4 rounded-lg space-y-4">
-                    {renderSecretInput(
-                      'API Key',
-                      config.geminiApiKey,
-                      (value) => setConfig({ ...config, geminiApiKey: value }),
-                      'AIza...',
-                      'geminiApiKey'
-                    )}
-                    <div>
-                      <label className="text-sm font-medium mb-2 block">Model</label>
-                      <select
-                        value={config.geminiModel}
-                        onChange={(e) => setConfig({ ...config, geminiModel: e.target.value })}
-                        className="w-full px-3 py-2 bg-input border border-border rounded-md focus:ring-2 focus:ring-primary focus:border-transparent"
-                      >
-                        <option value="gemini-pro">Gemini Pro</option>
-                        <option value="gemini-pro-vision">Gemini Pro Vision</option>
-                      </select>
-                    </div>
-                  </div>
-                </div>
-
-                <Separator />
-
-                {/* Qwen (通义千问) */}
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-2">
-                      <h3 className="text-lg font-semibold">通义千问 (Qwen)</h3>
-                      <Badge variant="secondary" className="text-xs">阿里云</Badge>
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleTestConnection('Qwen')}
-                    >
-                      测试连接
-                    </Button>
-                  </div>
-                  <div className="bg-muted/50 p-4 rounded-lg space-y-4">
-                    {renderSecretInput(
-                      'API Key',
-                      config.qwenApiKey,
-                      (value) => setConfig({ ...config, qwenApiKey: value }),
-                      'sk-...',
-                      'qwenApiKey'
-                    )}
-                    <div>
-                      <label className="text-sm font-medium mb-2 block">Base URL</label>
-                      <input
-                        type="text"
-                        value={config.qwenBaseUrl}
-                        onChange={(e) => setConfig({ ...config, qwenBaseUrl: e.target.value })}
-                        placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1"
-                        className="w-full px-3 py-2 bg-input border border-border rounded-md focus:ring-2 focus:ring-primary focus:border-transparent"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-sm font-medium mb-2 block">Model</label>
-                      <select
-                        value={config.qwenModel}
-                        onChange={(e) => setConfig({ ...config, qwenModel: e.target.value })}
-                        className="w-full px-3 py-2 bg-input border border-border rounded-md focus:ring-2 focus:ring-primary focus:border-transparent"
-                      >
-                        <option value="qwen-max">Qwen Max (最强)</option>
-                        <option value="qwen-plus">Qwen Plus</option>
-                        <option value="qwen-turbo">Qwen Turbo (快速)</option>
-                      </select>
-                    </div>
-                  </div>
-                </div>
-
-                <Separator />
-
-                {/* Moonshot Kimi */}
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-2">
-                      <h3 className="text-lg font-semibold">Moonshot Kimi</h3>
-                      <Badge variant="outline" className="text-xs">Kimi</Badge>
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleTestConnection('Moonshot')}
-                    >
-                      测试连接
-                    </Button>
-                  </div>
-                  <div className="bg-muted/50 p-4 rounded-lg space-y-4">
-                    {renderSecretInput(
-                      'API Key',
-                      config.moonshotApiKey,
-                      (value) => setConfig({ ...config, moonshotApiKey: value }),
-                      'sk-...',
-                      'moonshotApiKey'
-                    )}
-                    <div>
-                      <label className="text-sm font-medium mb-2 block">Base URL</label>
-                      <input
-                        type="text"
-                        value={config.moonshotBaseUrl}
-                        onChange={(e) => setConfig({ ...config, moonshotBaseUrl: e.target.value })}
-                        placeholder="https://api.moonshot.cn/v1"
-                        className="w-full px-3 py-2 bg-input border border-border rounded-md focus:ring-2 focus:ring-primary focus:border-transparent"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-sm font-medium mb-2 block">Model</label>
-                      <select
-                        value={config.moonshotModel}
-                        onChange={(e) => setConfig({ ...config, moonshotModel: e.target.value })}
-                        className="w-full px-3 py-2 bg-input border border-border rounded-md focus:ring-2 focus:ring-primary focus:border-transparent"
-                      >
-                        <option value="moonshot-v1-8k">Moonshot v1 8K</option>
-                        <option value="moonshot-v1-32k">Moonshot v1 32K</option>
-                        <option value="moonshot-v1-128k">Moonshot v1 128K</option>
-                      </select>
-                    </div>
-                  </div>
-                </div>
-
-                <Separator />
-
-                {/* Ollama */}
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-2">
-                      <h3 className="text-lg font-semibold">Ollama</h3>
-                      <Badge variant="secondary" className="text-xs">本地部署</Badge>
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleTestConnection('Ollama')}
-                    >
-                      测试连接
-                    </Button>
-                  </div>
-                  <div className="bg-muted/50 p-4 rounded-lg space-y-4">
-                    <div>
-                      <label className="text-sm font-medium mb-2 block">Base URL</label>
-                      <input
-                        type="text"
-                        value={config.ollamaBaseUrl}
-                        onChange={(e) => setConfig({ ...config, ollamaBaseUrl: e.target.value })}
-                        placeholder="http://localhost:11434"
-                        className="w-full px-3 py-2 bg-input border border-border rounded-md focus:ring-2 focus:ring-primary focus:border-transparent"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-sm font-medium mb-2 block">Model</label>
-                      <select
-                        value={config.ollamaModel}
-                        onChange={(e) => setConfig({ ...config, ollamaModel: e.target.value })}
-                        className="w-full px-3 py-2 bg-input border border-border rounded-md focus:ring-2 focus:ring-primary focus:border-transparent"
-                      >
-                        <option value="llama2">Llama 2</option>
-                        <option value="llama3">Llama 3</option>
-                        <option value="mistral">Mistral</option>
-                        <option value="codellama">Code Llama</option>
-                      </select>
-                    </div>
-                  </div>
-                </div>
-
-                <Separator />
-
-                {/* 火山引擎 */}
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-2">
-                      <h3 className="text-lg font-semibold">火山引擎</h3>
-                      <Badge variant="outline" className="text-xs">字节跳动</Badge>
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleTestConnection('Volcengine')}
-                    >
-                      测试连接
-                    </Button>
-                  </div>
-                  <div className="bg-muted/50 p-4 rounded-lg space-y-4">
-                    {renderSecretInput(
-                      'API Key',
-                      config.volcengineApiKey,
-                      (value) => setConfig({ ...config, volcengineApiKey: value }),
-                      '...',
-                      'volcengineApiKey'
-                    )}
-                    <div>
-                      <label className="text-sm font-medium mb-2 block">Base URL</label>
-                      <input
-                        type="text"
-                        value={config.volcengineBaseUrl}
-                        onChange={(e) => setConfig({ ...config, volcengineBaseUrl: e.target.value })}
-                        placeholder="https://ark.cn-beijing.volces.com/api/v3"
-                        className="w-full px-3 py-2 bg-input border border-border rounded-md focus:ring-2 focus:ring-primary focus:border-transparent"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-sm font-medium mb-2 block">Model</label>
-                      <input
-                        type="text"
-                        value={config.volcengineModel}
-                        onChange={(e) => setConfig({ ...config, volcengineModel: e.target.value })}
-                        placeholder="ep-20240110134838-xxxxx"
-                        className="w-full px-3 py-2 bg-input border border-border rounded-md focus:ring-2 focus:ring-primary focus:border-transparent"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <Separator />
-
-                {/* 阿里云百炼 */}
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-2">
-                      <h3 className="text-lg font-semibold">阿里云百炼</h3>
-                      <Badge variant="secondary" className="text-xs">阿里云</Badge>
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleTestConnection('Alibaba Bailian')}
-                    >
-                      测试连接
-                    </Button>
-                  </div>
-                  <div className="bg-muted/50 p-4 rounded-lg space-y-4">
-                    {renderSecretInput(
-                      'API Key',
-                      config.alibabaBailianApiKey,
-                      (value) => setConfig({ ...config, alibabaBailianApiKey: value }),
-                      'sk-...',
-                      'alibabaBailianApiKey'
-                    )}
-                    <div>
-                      <label className="text-sm font-medium mb-2 block">Base URL</label>
-                      <input
-                        type="text"
-                        value={config.alibabaBailianBaseUrl}
-                        onChange={(e) => setConfig({ ...config, alibabaBailianBaseUrl: e.target.value })}
-                        placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1"
-                        className="w-full px-3 py-2 bg-input border border-border rounded-md focus:ring-2 focus:ring-primary focus:border-transparent"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-sm font-medium mb-2 block">Model</label>
-                      <select
-                        value={config.alibabaBailianModel}
-                        onChange={(e) => setConfig({ ...config, alibabaBailianModel: e.target.value })}
-                        className="w-full px-3 py-2 bg-input border border-border rounded-md focus:ring-2 focus:ring-primary focus:border-transparent"
-                      >
-                        <option value="qwen-max">Qwen Max</option>
-                        <option value="qwen-plus">Qwen Plus</option>
-                        <option value="qwen-turbo">Qwen Turbo</option>
-                      </select>
-                    </div>
-                  </div>
-                </div>
-
-                <Separator />
-
-                {/* 硅基流动 */}
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-2">
-                      <h3 className="text-lg font-semibold">硅基流动</h3>
-                      <Badge variant="outline" className="text-xs">SiliconFlow</Badge>
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleTestConnection('SiliconFlow')}
-                    >
-                      测试连接
-                    </Button>
-                  </div>
-                  <div className="bg-muted/50 p-4 rounded-lg space-y-4">
-                    {renderSecretInput(
-                      'API Key',
-                      config.siliconflowApiKey,
-                      (value) => setConfig({ ...config, siliconflowApiKey: value }),
-                      'sk-...',
-                      'siliconflowApiKey'
-                    )}
-                    <div>
-                      <label className="text-sm font-medium mb-2 block">Base URL</label>
-                      <input
-                        type="text"
-                        value={config.siliconflowBaseUrl}
-                        onChange={(e) => setConfig({ ...config, siliconflowBaseUrl: e.target.value })}
-                        placeholder="https://api.siliconflow.cn/v1"
-                        className="w-full px-3 py-2 bg-input border border-border rounded-md focus:ring-2 focus:ring-primary focus:border-transparent"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-sm font-medium mb-2 block">Model</label>
-                      <select
-                        value={config.siliconflowModel}
-                        onChange={(e) => setConfig({ ...config, siliconflowModel: e.target.value })}
-                        className="w-full px-3 py-2 bg-input border border-border rounded-md focus:ring-2 focus:ring-primary focus:border-transparent"
-                      >
-                        <option value="Qwen/Qwen2.5-7B-Instruct">Qwen 2.5 7B</option>
-                        <option value="Qwen/Qwen2.5-72B-Instruct">Qwen 2.5 72B</option>
-                        <option value="deepseek-ai/DeepSeek-V3">DeepSeek V3</option>
-                      </select>
-                    </div>
-                  </div>
-                </div>
-
-                <Separator />
-
-                {/* OpenRouter */}
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-2">
-                      <h3 className="text-lg font-semibold">OpenRouter</h3>
-                      <Badge variant="secondary" className="text-xs">多模型聚合</Badge>
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleTestConnection('OpenRouter')}
-                    >
-                      测试连接
-                    </Button>
-                  </div>
-                  <div className="bg-muted/50 p-4 rounded-lg space-y-4">
-                    {renderSecretInput(
-                      'API Key',
-                      config.openrouterApiKey,
-                      (value) => setConfig({ ...config, openrouterApiKey: value }),
-                      'sk-or-...',
-                      'openrouterApiKey'
-                    )}
-                    <div>
-                      <label className="text-sm font-medium mb-2 block">Base URL</label>
-                      <input
-                        type="text"
-                        value={config.openrouterBaseUrl}
-                        onChange={(e) => setConfig({ ...config, openrouterBaseUrl: e.target.value })}
-                        placeholder="https://openrouter.ai/api/v1"
-                        className="w-full px-3 py-2 bg-input border border-border rounded-md focus:ring-2 focus:ring-primary focus:border-transparent"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-sm font-medium mb-2 block">Model</label>
-                      <select
-                        value={config.openrouterModel}
-                        onChange={(e) => setConfig({ ...config, openrouterModel: e.target.value })}
-                        className="w-full px-3 py-2 bg-input border border-border rounded-md focus:ring-2 focus:ring-primary focus:border-transparent"
-                      >
-                        <option value="openai/gpt-4-turbo">GPT-4 Turbo</option>
-                        <option value="anthropic/claude-3-opus">Claude 3 Opus</option>
-                        <option value="google/gemini-pro">Gemini Pro</option>
-                      </select>
-                    </div>
-                  </div>
-                </div>
-
-                <Separator />
-
-                {/* 轮询策略 */}
-                <div className="space-y-4">
-                  <div className="flex items-center space-x-2">
-                    <h3 className="text-lg font-semibold">轮询策略</h3>
-                    <Badge variant="default" className="text-xs">智能选择</Badge>
-                  </div>
-                  <div className="bg-muted/50 p-4 rounded-lg">
-                    <label className="text-sm font-medium mb-2 block">选择提供商轮询策略</label>
-                    <select
-                      value={config.aiRotationStrategy}
-                      onChange={(e) => setConfig({ ...config, aiRotationStrategy: e.target.value })}
-                      className="w-full px-3 py-2 bg-input border border-border rounded-md focus:ring-2 focus:ring-primary focus:border-transparent"
-                    >
-                      <option value="sequential">顺序轮询 - 按顺序依次使用提供商</option>
-                      <option value="random">随机轮询 - 随机选择可用提供商</option>
-                    </select>
-                    <p className="text-xs text-muted-foreground mt-2">
-                      当不指定提供商时，系统会使用此策略自动选择AI模型
-                    </p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          {/* WeChat Configuration */}
-          <TabsContent value="wechat">
-            <Card>
-              <CardHeader>
-                <CardTitle>微信公众号配置</CardTitle>
-                <CardDescription>配置微信公众号的 AppID 和 AppSecret 以实现自动发布</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 p-4 rounded-lg">
-                  <div className="flex items-start space-x-3">
-                    <Key className="h-5 w-5 text-green-600 dark:text-green-400 mt-0.5" />
-                    <div>
-                      <h4 className="font-medium text-green-900 dark:text-green-100 mb-1">为什么需要配置？</h4>
-                      <p className="text-sm text-green-700 dark:text-green-300">配置微信公众号后，系统可以自动将生成的文章发布到你的公众号，实现全流程自动化。</p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-4">
                   <div>
-                    <label className="text-sm font-medium mb-2 flex items-center">
-                      AppID
-                      <Badge variant="outline" className="ml-2 text-xs">必需</Badge>
-                    </label>
-                    <input
-                      type="text"
-                      value={config.wechatAppId}
-                      onChange={(e) => setConfig({ ...config, wechatAppId: e.target.value })}
-                      placeholder="wx..."
-                      className="w-full px-3 py-2 bg-input border border-border rounded-md focus:ring-2 focus:ring-primary focus:border-transparent"
-                    />
-                    <p className="text-xs text-muted-foreground mt-2">
-                      微信公众号的唯一标识符，以 wx 开头
-                    </p>
-                  </div>
-
-                  {renderSecretInput(
-                    'AppSecret',
-                    config.wechatAppSecret,
-                    (value) => setConfig({ ...config, wechatAppSecret: value }),
-                    '...',
-                    'wechatAppSecret'
-                  )}
-                  <p className="text-xs text-muted-foreground">
-                    用于接口调用的密钥，请妥善保管
-                  </p>
-                </div>
-
-                <Separator />
-
-                <div className="bg-muted/50 p-4 rounded-lg">
-                  <h4 className="font-medium mb-3 flex items-center">
-                    <AlertCircle className="mr-2 h-4 w-4" />
-                    如何获取 AppID 和 AppSecret?
-                  </h4>
-                  <ol className="text-sm text-muted-foreground space-y-2 list-decimal list-inside">
-                    <li>登录 <a href="https://mp.weixin.qq.com" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">微信公众平台</a></li>
-                    <li>进入 &quot;开发 &gt; 基本配置&quot;</li>
-                    <li>查看 AppID 和生成 AppSecret</li>
-                    <li>配置服务器地址和令牌（如果需要）</li>
-                  </ol>
-                </div>
-
-                <div className="bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 p-4 rounded-lg">
-                  <h4 className="font-medium mb-2 text-blue-900 dark:text-blue-100">注意事项</h4>
-                  <ul className="text-sm text-blue-700 dark:text-blue-300 space-y-1 list-disc list-inside">
-                    <li>AppSecret 只显示一次，请立即保存</li>
-                    <li>确保公众号已认证（服务号或订阅号）</li>
-                    <li>需要开启公众号的"开发者权限"</li>
-                  </ul>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          {/* Database Configuration */}
-          <TabsContent value="database">
-            <Card>
-              <CardHeader>
-                <CardTitle>数据库配置</CardTitle>
-                <CardDescription>配置 PostgreSQL 和 Redis 连接信息</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 p-4 rounded-lg">
-                  <div className="flex items-start space-x-3">
-                    <AlertCircle className="h-5 w-5 text-blue-600 dark:text-blue-400 mt-0.5" />
-                    <div>
-                      <h4 className="font-medium text-blue-900 dark:text-blue-100 mb-1">为什么需要配置数据库？</h4>
-                      <p className="text-sm text-blue-700 dark:text-blue-300">数据库用于存储文章、任务记录和系统配置。如果你使用 Docker 部署，通常使用默认配置即可。</p>
-                    </div>
+                    <h3 className="font-medium text-slate-900">DeepSeek</h3>
+                    <p className="text-xs text-slate-500">性价比高，推荐使用</p>
                   </div>
                 </div>
-
+                <button
+                  onClick={() => handleTestConnection('DeepSeek')}
+                  disabled={loading}
+                  className="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-600 text-xs font-medium hover:bg-slate-200"
+                >
+                  测试连接
+                </button>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="text-sm font-medium mb-2 flex items-center">
-                    PostgreSQL 连接地址
-                    <Badge variant="outline" className="ml-2 text-xs">必需</Badge>
-                  </label>
-                  <input
-                    type="text"
-                    value={config.databaseUrl}
-                    onChange={(e) => setConfig({ ...config, databaseUrl: e.target.value })}
-                    placeholder="postgresql+asyncpg://user:password@localhost:5432/wechat_ai_writer"
-                    className="w-full px-3 py-2 bg-input border border-border rounded-md font-mono text-sm focus:ring-2 focus:ring-primary focus:border-transparent"
-                  />
-                  <p className="text-xs text-muted-foreground mt-2">
-                    格式: postgresql+asyncpg://用户名:密码@主机:端口/数据库名
-                  </p>
-                </div>
-
-                <div>
-                  <label className="text-sm font-medium mb-2 flex items-center">
-                    Redis 连接地址
-                    <Badge variant="outline" className="ml-2 text-xs">必需</Badge>
-                  </label>
-                  <input
-                    type="text"
-                    value={config.redisUrl}
-                    onChange={(e) => setConfig({ ...config, redisUrl: e.target.value })}
-                    placeholder="redis://localhost:6379/0"
-                    className="w-full px-3 py-2 bg-input border border-border rounded-md font-mono text-sm focus:ring-2 focus:ring-primary focus:border-transparent"
-                  />
-                  <p className="text-xs text-muted-foreground mt-2">
-                    格式: redis://主机:端口/数据库编号
-                  </p>
-                </div>
-
-                <div className="bg-muted/50 p-4 rounded-lg">
-                  <h4 className="font-medium mb-2 flex items-center">
-                    <CheckCircle2 className="mr-2 h-4 w-4 text-green-600" />
-                    Docker 部署推荐配置
-                  </h4>
-                  <div className="space-y-2 text-sm">
-                    <div className="flex items-center justify-between p-2 bg-background rounded">
-                      <span className="text-muted-foreground">PostgreSQL:</span>
-                      <code className="text-xs bg-muted px-2 py-1 rounded">postgresql+asyncpg://postgres:postgres@postgres:5432/wechat_ai_writer</code>
-                    </div>
-                    <div className="flex items-center justify-between p-2 bg-background rounded">
-                      <span className="text-muted-foreground">Redis:</span>
-                      <code className="text-xs bg-muted px-2 py-1 rounded">redis://redis:6379/0</code>
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          {/* Image Configuration */}
-          <TabsContent value="image">
-            <Card>
-              <CardHeader>
-                <CardTitle>图片配置</CardTitle>
-                <CardDescription>配置图片处理和生成参数</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-sm font-medium mb-2 block">封面图宽度</label>
+                  <label className="block text-xs text-slate-500 mb-1.5">API Key</label>
+                  <div className="relative">
                     <input
-                      type="number"
-                      value={config.coverImageWidth}
-                      onChange={(e) => setConfig({ ...config, coverImageWidth: parseInt(e.target.value) })}
-                      className="w-full px-3 py-2 bg-input border border-border rounded-md"
+                      type={showSecrets.deepseek ? 'text' : 'password'}
+                      value={config.deepseekApiKey}
+                      onChange={(e) => setConfig({ ...config, deepseekApiKey: e.target.value })}
+                      placeholder="sk-..."
+                      className={inputClasses + " pr-10"}
                     />
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium mb-2 block">封面图高度</label>
-                    <input
-                      type="number"
-                      value={config.coverImageHeight}
-                      onChange={(e) => setConfig({ ...config, coverImageHeight: parseInt(e.target.value) })}
-                      className="w-full px-3 py-2 bg-input border border-border rounded-md"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium mb-2 block">最小宽度</label>
-                    <input
-                      type="number"
-                      value={config.coverImageMinWidth}
-                      onChange={(e) => setConfig({ ...config, coverImageMinWidth: parseInt(e.target.value) })}
-                      className="w-full px-3 py-2 bg-input border border-border rounded-md"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium mb-2 block">最小高度</label>
-                    <input
-                      type="number"
-                      value={config.coverImageMinHeight}
-                      onChange={(e) => setConfig({ ...config, coverImageMinHeight: parseInt(e.target.value) })}
-                      className="w-full px-3 py-2 bg-input border border-border rounded-md"
-                    />
+                    <button
+                      onClick={() => setShowSecrets(prev => ({ ...prev, deepseek: !prev.deepseek }))}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                    >
+                      {showSecrets.deepseek ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
                   </div>
                 </div>
                 <div>
-                  <label className="text-sm font-medium mb-2 block">最大文件大小 (字节)</label>
-                  <input
-                    type="number"
-                    value={config.imageMaxSize}
-                    onChange={(e) => setConfig({ ...config, imageMaxSize: parseInt(e.target.value) })}
-                    className="w-full px-3 py-2 bg-input border border-border rounded-md"
-                  />
-                  <p className="text-xs text-muted-foreground mt-1">
-                    默认: 5242880 (5MB)
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          {/* Logging Configuration */}
-          <TabsContent value="logging">
-            <Card>
-              <CardHeader>
-                <CardTitle>日志配置</CardTitle>
-                <CardDescription>配置系统日志记录和监控</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div>
-                  <label className="text-sm font-medium mb-2 block">日志级别</label>
-                  <select
-                    value={config.logLevel}
-                    onChange={(e) => setConfig({ ...config, logLevel: e.target.value })}
-                    className="w-full px-3 py-2 bg-input border border-border rounded-md"
-                  >
-                    <option value="DEBUG">DEBUG - 调试信息</option>
-                    <option value="INFO">INFO - 一般信息</option>
-                    <option value="WARNING">WARNING - 警告信息</option>
-                    <option value="ERROR">ERROR - 错误信息</option>
-                    <option value="CRITICAL">CRITICAL - 严重错误</option>
+                  <label className="block text-xs text-slate-500 mb-1.5">Model</label>
+                  <select value={config.deepseekModel} onChange={(e) => setConfig({ ...config, deepseekModel: e.target.value })} className={inputClasses}>
+                    <option value="deepseek-chat">DeepSeek Chat</option>
+                    <option value="deepseek-coder">DeepSeek Coder</option>
                   </select>
-                  <p className="text-xs text-muted-foreground mt-2">
-                    生产环境建议使用 INFO 或 WARNING
-                  </p>
                 </div>
-
-                <div>
-                  <label className="text-sm font-medium mb-2 block">日志文件路径</label>
-                  <input
-                    type="text"
-                    value={config.logFile}
-                    onChange={(e) => setConfig({ ...config, logFile: e.target.value })}
-                    placeholder="logs/app.log"
-                    className="w-full px-3 py-2 bg-input border border-border rounded-md"
-                  />
+                <div className="sm:col-span-2">
+                  <label className="block text-xs text-slate-500 mb-1.5">Base URL</label>
+                  <input type="text" value={config.deepseekBaseUrl} onChange={(e) => setConfig({ ...config, deepseekBaseUrl: e.target.value })} className={inputClasses} />
                 </div>
+              </div>
+            </div>
 
-                <Separator />
-
-                <div>
-                  <label className="text-sm font-medium mb-2 flex items-center">
-                    启用性能监控
-                  </label>
-                  <div className="flex items-center space-x-2">
-                    <input
-                      type="checkbox"
-                      checked={config.enableMetrics}
-                      onChange={(e) => setConfig({ ...config, enableMetrics: e.target.checked })}
-                      className="w-5 h-5"
-                    />
-                    <span className="text-sm text-muted-foreground">收集性能指标</span>
+            {/* OpenAI */}
+            <div className="bg-white rounded-2xl border border-slate-200 p-5">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-blue-100 flex items-center justify-center">
+                    <Bot className="w-4 h-4 text-blue-600" />
+                  </div>
+                  <div>
+                    <h3 className="font-medium text-slate-900">OpenAI</h3>
+                    <p className="text-xs text-slate-500">GPT-4 系列</p>
                   </div>
                 </div>
-
+                <button onClick={() => handleTestConnection('OpenAI')} disabled={loading} className="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-600 text-xs font-medium hover:bg-slate-200">
+                  测试连接
+                </button>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="text-sm font-medium mb-2 block">监控端口</label>
-                  <input
-                    type="number"
-                    value={config.metricsPort}
-                    onChange={(e) => setConfig({ ...config, metricsPort: parseInt(e.target.value) })}
-                    className="w-full px-3 py-2 bg-input border border-border rounded-md"
-                  />
-                  <p className="text-xs text-muted-foreground mt-1">
-                    默认: 9090
-                  </p>
-                </div>
-
-                <div>
-                  <label className="text-sm font-medium mb-2 block">Sentry DSN (可选)</label>
-                  <input
-                    type="text"
-                    value={config.sentryDsn}
-                    onChange={(e) => setConfig({ ...config, sentryDsn: e.target.value })}
-                    placeholder="https://xxx@sentry.io/xxx"
-                    className="w-full px-3 py-2 bg-input border border-border rounded-md"
-                  />
-                  <p className="text-xs text-muted-foreground mt-2">
-                    用于错误追踪和监控，留空则不启用
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          {/* Security Configuration */}
-          <TabsContent value="security">
-            <Card>
-              <CardHeader>
-                <CardTitle>安全配置</CardTitle>
-                <CardDescription>配置系统安全防护和访问控制</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 p-4 rounded-lg">
-                  <div className="flex items-start space-x-3">
-                    <AlertCircle className="h-5 w-5 text-red-600 dark:text-red-400 mt-0.5" />
-                    <div>
-                      <h4 className="font-medium text-red-900 dark:text-red-100 mb-1">安全提示</h4>
-                      <p className="text-sm text-red-700 dark:text-red-300">合理的限流配置可以防止恶意请求，保护系统稳定性。</p>
-                    </div>
+                  <label className="block text-xs text-slate-500 mb-1.5">API Key</label>
+                  <div className="relative">
+                    <input type={showSecrets.openai ? 'text' : 'password'} value={config.openaiApiKey} onChange={(e) => setConfig({ ...config, openaiApiKey: e.target.value })} placeholder="sk-..." className={inputClasses + " pr-10"} />
+                    <button onClick={() => setShowSecrets(prev => ({ ...prev, openai: !prev.openai }))} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                      {showSecrets.openai ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
                   </div>
                 </div>
-
                 <div>
-                  <label className="text-sm font-medium mb-2 flex items-center">
-                    启用请求限流
-                  </label>
-                  <div className="flex items-center space-x-2">
-                    <input
-                      type="checkbox"
-                      checked={config.rateLimitEnabled}
-                      onChange={(e) => setConfig({ ...config, rateLimitEnabled: e.target.checked })}
-                      className="w-5 h-5"
-                    />
-                    <span className="text-sm text-muted-foreground">限制每个用户的请求频率</span>
+                  <label className="block text-xs text-slate-500 mb-1.5">Model</label>
+                  <select value={config.openaiModel} onChange={(e) => setConfig({ ...config, openaiModel: e.target.value })} className={inputClasses}>
+                    <option value="gpt-4-turbo-preview">GPT-4 Turbo</option>
+                    <option value="gpt-4">GPT-4</option>
+                    <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Gemini */}
+            <div className="bg-white rounded-2xl border border-slate-200 p-5">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-9 h-9 rounded-xl bg-emerald-100 flex items-center justify-center">
+                  <Bot className="w-4 h-4 text-emerald-600" />
+                </div>
+                <div>
+                  <h3 className="font-medium text-slate-900">Gemini</h3>
+                  <p className="text-xs text-slate-500">Google AI</p>
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs text-slate-500 mb-1.5">API Key</label>
+                <div className="relative">
+                  <input type={showSecrets.gemini ? 'text' : 'password'} value={config.geminiApiKey} onChange={(e) => setConfig({ ...config, geminiApiKey: e.target.value })} placeholder="AIza..." className={inputClasses + " pr-10"} />
+                  <button onClick={() => setShowSecrets(prev => ({ ...prev, gemini: !prev.gemini }))} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                    {showSecrets.gemini ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 微信配置 */}
+        {activeTab === 'wechat' && (
+          <div className="bg-white rounded-2xl border border-slate-200 p-5">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-9 h-9 rounded-xl bg-green-100 flex items-center justify-center">
+                <MessageCircle className="w-4 h-4 text-green-600" />
+              </div>
+              <div>
+                <h3 className="font-medium text-slate-900">微信公众号</h3>
+                <p className="text-xs text-slate-500">用于自动发布文章到公众号草稿箱</p>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs text-slate-500 mb-1.5">App ID</label>
+                <input type="text" value={config.wechatAppId} onChange={(e) => setConfig({ ...config, wechatAppId: e.target.value })} placeholder="wx..." className={inputClasses} />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-500 mb-1.5">App Secret</label>
+                <div className="relative">
+                  <input type={showSecrets.wechat ? 'text' : 'password'} value={config.wechatAppSecret} onChange={(e) => setConfig({ ...config, wechatAppSecret: e.target.value })} placeholder="..." className={inputClasses + " pr-10"} />
+                  <button onClick={() => setShowSecrets(prev => ({ ...prev, wechat: !prev.wechat }))} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                    {showSecrets.wechat ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div className="mt-4 p-3 rounded-xl bg-green-50 text-sm text-green-700">
+              配置后可直接发布文章到公众号草稿箱
+            </div>
+          </div>
+        )}
+
+        {/* 图片生成配置 */}
+        {activeTab === 'image' && (
+          <div className="space-y-4">
+            <div className="bg-white rounded-2xl border border-slate-200 p-5">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-purple-100 flex items-center justify-center">
+                    <Wand2 className="w-4 h-4 text-purple-600" />
+                  </div>
+                  <div>
+                    <h3 className="font-medium text-slate-900">图片生成配置</h3>
+                    <p className="text-xs text-slate-500">配置AI图片生成服务</p>
                   </div>
                 </div>
-
-                <div>
-                  <label className="text-sm font-medium mb-2 block">限流请求数</label>
-                  <input
-                    type="number"
-                    value={config.rateLimitRequests}
-                    onChange={(e) => setConfig({ ...config, rateLimitRequests: parseInt(e.target.value) })}
-                    className="w-full px-3 py-2 bg-input border border-border rounded-md"
-                  />
-                  <p className="text-xs text-muted-foreground mt-1">
-                    默认: 100 (每个时间窗口内的最大请求数)
-                  </p>
-                </div>
-
-                <div>
-                  <label className="text-sm font-medium mb-2 block">限流时间周期 (秒)</label>
-                  <input
-                    type="number"
-                    value={config.rateLimitPeriod}
-                    onChange={(e) => setConfig({ ...config, rateLimitPeriod: parseInt(e.target.value) })}
-                    className="w-full px-3 py-2 bg-input border border-border rounded-md"
-                  />
-                  <p className="text-xs text-muted-foreground mt-1">
-                    默认: 60 (秒)
-                  </p>
-                </div>
-
-                <div className="bg-muted/50 p-4 rounded-lg">
-                  <h4 className="font-medium mb-2">限流示例</h4>
-                  <div className="text-sm text-muted-foreground space-y-1">
-                    <p>当前配置: 每分钟最多 100 次请求</p>
-                    <p>超出限制将返回 429 错误</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          {/* Application Configuration */}
-          <TabsContent value="app">
-            <Card>
-              <CardHeader>
-                <CardTitle>应用配置</CardTitle>
-                <CardDescription>配置应用基本信息和安全设置</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div>
-                  <label className="text-sm font-medium mb-2 block">应用名称</label>
-                  <input
-                    type="text"
-                    value={config.appName}
-                    onChange={(e) => setConfig({ ...config, appName: e.target.value })}
-                    placeholder="AI公众号自动写作助手 Pro"
-                    className="w-full px-3 py-2 bg-input border border-border rounded-md"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-sm font-medium mb-2 block">应用版本</label>
-                  <input
-                    type="text"
-                    value={config.appVersion}
-                    onChange={(e) => setConfig({ ...config, appVersion: e.target.value })}
-                    placeholder="1.0.0"
-                    className="w-full px-3 py-2 bg-input border border-border rounded-md"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-sm font-medium mb-2 flex items-center">
-                    应用密钥
-                    <Badge variant="destructive" className="ml-2 text-xs">重要</Badge>
-                  </label>
-                  {renderSecretInput(
-                    '',
-                    config.secretKey,
-                    (value) => setConfig({ ...config, secretKey: value }),
-                    '生成一个强随机密钥',
-                    'secretKey'
+                <div className="flex items-center gap-2">
+                  {imageProviders.length === 0 && (
+                    <button onClick={handleQuickSetup} disabled={loading} className="px-3 py-1.5 rounded-lg bg-purple-500 text-white text-xs font-medium hover:bg-purple-600">
+                      快速设置
+                    </button>
                   )}
-                  <p className="text-xs text-muted-foreground mt-2">
-                    用于加密和会话管理，建议使用至少 32 位的随机字符串
-                  </p>
+                  <button onClick={() => setShowAddProvider(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 text-slate-700 text-xs font-medium hover:bg-slate-200">
+                    <Plus className="w-3.5 h-3.5" />
+                    添加
+                  </button>
                 </div>
+              </div>
 
-                <Separator />
-
-                <div>
-                  <label className="text-sm font-medium mb-2 block">上传目录</label>
-                  <input
-                    type="text"
-                    value={config.uploadDir}
-                    onChange={(e) => setConfig({ ...config, uploadDir: e.target.value })}
-                    placeholder="uploads"
-                    className="w-full px-3 py-2 bg-input border border-border rounded-md"
-                  />
+              {/* 提供商列表 */}
+              {imageProviders.length === 0 ? (
+                <div className="text-center py-8">
+                  <ImageIcon className="w-10 h-10 text-slate-300 mx-auto mb-3" />
+                  <p className="text-slate-500 text-sm mb-3">暂无图片生成配置</p>
+                  <button onClick={handleQuickSetup} className="px-4 py-2 rounded-xl bg-purple-500 text-white text-sm font-medium hover:bg-purple-600">
+                    快速设置
+                  </button>
                 </div>
-
-                <div>
-                  <label className="text-sm font-medium mb-2 block">临时目录</label>
-                  <input
-                    type="text"
-                    value={config.tempDir}
-                    onChange={(e) => setConfig({ ...config, tempDir: e.target.value })}
-                    placeholder="temp"
-                    className="w-full px-3 py-2 bg-input border border-border rounded-md"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-sm font-medium mb-2 block">最大上传大小 (字节)</label>
-                  <input
-                    type="number"
-                    value={config.maxUploadSize}
-                    onChange={(e) => setConfig({ ...config, maxUploadSize: parseInt(e.target.value) })}
-                    className="w-full px-3 py-2 bg-input border border-border rounded-md"
-                  />
-                  <p className="text-xs text-muted-foreground mt-1">
-                    默认: 20971520 (20MB)
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          {/* Task Configuration */}
-          <TabsContent value="task">
-            <Card>
-              <CardHeader>
-                <CardTitle>任务配置</CardTitle>
-                <CardDescription>配置异步任务和调度器参数</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div>
-                  <label className="text-sm font-medium mb-2 block">Celery 消息队列地址</label>
-                  <input
-                    type="text"
-                    value={config.celeryBrokerUrl}
-                    onChange={(e) => setConfig({ ...config, celeryBrokerUrl: e.target.value })}
-                    placeholder="redis://localhost:6379/1"
-                    className="w-full px-3 py-2 bg-input border border-border rounded-md font-mono text-sm"
-                  />
-                  <p className="text-xs text-muted-foreground mt-2">
-                    用于任务消息传递，建议使用 Redis 数据库编号 1
-                  </p>
-                </div>
-
-                <div>
-                  <label className="text-sm font-medium mb-2 block">Celery 结果存储地址</label>
-                  <input
-                    type="text"
-                    value={config.celeryResultBackend}
-                    onChange={(e) => setConfig({ ...config, celeryResultBackend: e.target.value })}
-                    placeholder="redis://localhost:6379/1"
-                    className="w-full px-3 py-2 bg-input border border-border rounded-md font-mono text-sm"
-                  />
-                  <p className="text-xs text-muted-foreground mt-2">
-                    用于存储任务执行结果
-                  </p>
-                </div>
-
-                <div>
-                  <label className="text-sm font-medium mb-2 block">任务超时时间 (秒)</label>
-                  <input
-                    type="number"
-                    value={config.taskTimeout}
-                    onChange={(e) => setConfig({ ...config, taskTimeout: parseInt(e.target.value) })}
-                    className="w-full px-3 py-2 bg-input border border-border rounded-md"
-                  />
-                  <p className="text-xs text-muted-foreground mt-1">
-                    默认: 3600 (1小时)
-                  </p>
-                </div>
-
-                <div>
-                  <label className="text-sm font-medium mb-2 block">最大重试次数</label>
-                  <input
-                    type="number"
-                    value={config.taskMaxRetries}
-                    onChange={(e) => setConfig({ ...config, taskMaxRetries: parseInt(e.target.value) })}
-                    className="w-full px-3 py-2 bg-input border border-border rounded-md"
-                  />
-                  <p className="text-xs text-muted-foreground mt-1">
-                    默认: 3 次
-                  </p>
-                </div>
-
-                <div className="bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 p-4 rounded-lg">
-                  <div className="flex items-start space-x-3">
-                    <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400 mt-0.5" />
-                    <div>
-                      <h4 className="font-medium text-green-900 dark:text-green-100 mb-1">提示</h4>
-                      <p className="text-sm text-green-700 dark:text-green-300">如果你使用 Docker 部署，Celery 配置通常使用默认值即可。</p>
+              ) : (
+                <div className="space-y-2">
+                  {imageProviders.map((provider) => (
+                    <div key={provider.id} className="flex items-center justify-between p-3 rounded-xl bg-slate-50">
+                      <div className="flex items-center gap-3">
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${provider.is_default ? 'bg-purple-100' : 'bg-slate-200'}`}>
+                          <ImageIcon className={`w-4 h-4 ${provider.is_default ? 'text-purple-600' : 'text-slate-400'}`} />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium text-slate-900 text-sm">{provider.name}</span>
+                            {provider.is_default && <span className="px-1.5 py-0.5 rounded bg-yellow-100 text-yellow-700 text-xs">默认</span>}
+                          </div>
+                          <span className="text-xs text-slate-500">{provider.provider_type}</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <button onClick={() => handleTestProvider(provider.id)} className="p-1.5 rounded-lg hover:bg-slate-200 text-slate-400 hover:text-slate-600">
+                          <TestTube className="w-4 h-4" />
+                        </button>
+                        {!provider.is_default && (
+                          <button onClick={() => handleSetDefault(provider.id)} className="p-1.5 rounded-lg hover:bg-yellow-50 text-slate-400 hover:text-yellow-600">
+                            <Star className="w-4 h-4" />
+                          </button>
+                        )}
+                        <button onClick={() => handleDeleteProvider(provider.id)} className="p-1.5 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-500">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
-                  </div>
+                  ))}
                 </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
+              )}
+            </div>
 
-          {/* Features Configuration */}
-          <TabsContent value="features">
-            <Card>
-              <CardHeader>
-                <CardTitle>功能开关</CardTitle>
-                <CardDescription>启用或禁用系统功能</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors">
-                  <div className="flex-1">
-                    <div className="flex items-center space-x-2">
-                      <h4 className="font-medium">深度研究</h4>
-                      <Badge variant="secondary" className="text-xs">高级</Badge>
+            {/* 推荐配置 */}
+            <div className="bg-gradient-to-r from-purple-50 to-pink-50 rounded-2xl p-5">
+              <h4 className="text-sm font-medium text-slate-900 mb-3">推荐配置</h4>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {[
+                  { name: 'Pollinations.ai', desc: '完全免费，无需Key', tags: ['推荐', '免费'] },
+                  { name: '通义万相', desc: '阿里云，支持中文', tags: ['推荐', '中文'] },
+                  { name: 'Pexels', desc: '免费高质量图库', tags: ['推荐', '真实图片'] },
+                ].map((item, idx) => (
+                  <div key={idx} className="bg-white rounded-xl p-3 border border-purple-100">
+                    <div className="flex gap-1 mb-2">
+                      {item.tags.map((tag, i) => (
+                        <span key={i} className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-600 text-xs">{tag}</span>
+                      ))}
                     </div>
-                    <p className="text-sm text-muted-foreground mt-1">启用联网搜索,增强内容深度和准确性</p>
+                    <h5 className="font-medium text-slate-900 text-sm">{item.name}</h5>
+                    <p className="text-xs text-slate-500">{item.desc}</p>
                   </div>
-                  <input
-                    type="checkbox"
-                    checked={config.enableResearch}
-                    onChange={(e) => setConfig({ ...config, enableResearch: e.target.checked })}
-                    className="w-5 h-5"
-                  />
-                </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
 
-                <div className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors">
-                  <div className="flex-1">
-                    <div className="flex items-center space-x-2">
-                      <h4 className="font-medium">AI 图片生成</h4>
-                      <Badge variant="secondary" className="text-xs">推荐</Badge>
-                    </div>
-                    <p className="text-sm text-muted-foreground mt-1">自动生成封面图和技术配图</p>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={config.enableImageGeneration}
-                    onChange={(e) => setConfig({ ...config, enableImageGeneration: e.target.checked })}
-                    className="w-5 h-5"
-                  />
-                </div>
+      {/* 添加配置弹窗 */}
+      {showAddProvider && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowAddProvider(false)} />
+          <div className="relative w-full max-w-md bg-white rounded-2xl p-5">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-semibold text-slate-900">添加图片生成配置</h3>
+              <button onClick={() => setShowAddProvider(false)} className="p-1.5 rounded-lg hover:bg-slate-100">
+                <EyeOff className="w-4 h-4 text-slate-500" />
+              </button>
+            </div>
 
-                <div className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors">
-                  <div className="flex-1">
-                    <h4 className="font-medium">Markdown 编辑器</h4>
-                    <p className="text-sm text-muted-foreground mt-1">使用 Markdown 编辑器编写内容</p>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={config.enableMarkdownEditor}
-                    onChange={(e) => setConfig({ ...config, enableMarkdownEditor: e.target.checked })}
-                    className="w-5 h-5"
-                  />
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs text-slate-500 mb-1.5">提供商类型</label>
+                <select
+                  value={newProvider.provider_type}
+                  onChange={(e) => {
+                    const selectedType = providerTypes.find(p => p.type === e.target.value)
+                    setNewProvider({ ...newProvider, provider_type: e.target.value, name: selectedType?.name || '' })
+                  }}
+                  className={inputClasses}
+                >
+                  {providerTypes.map((type) => (
+                    <option key={type.type} value={type.type}>
+                      {type.recommended ? '⭐ ' : ''}{type.name} {type.requires_config ? '' : '(免费)'}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-slate-500">{providerTypes.find(p => p.type === newProvider.provider_type)?.description}</p>
+              </div>
+
+              <div>
+                <label className="block text-xs text-slate-500 mb-1.5">配置名称</label>
+                <input type="text" value={newProvider.name} onChange={(e) => setNewProvider({ ...newProvider, name: e.target.value })} className={inputClasses} />
+              </div>
+
+              {providerTypes.find(p => p.type === newProvider.provider_type)?.requires_config && (
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1.5">API Key</label>
+                  <input type="password" value={newProvider.api_key} onChange={(e) => setNewProvider({ ...newProvider, api_key: e.target.value })} placeholder="sk-..." className={inputClasses} />
                 </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
-      </main>
+              )}
+
+              <div className="flex items-center gap-2">
+                <input type="checkbox" id="is_default" checked={newProvider.is_default} onChange={(e) => setNewProvider({ ...newProvider, is_default: e.target.checked })} className="w-4 h-4 rounded border-slate-300" />
+                <label htmlFor="is_default" className="text-sm text-slate-600">设为默认提供商</label>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3">
+                <button onClick={() => setShowAddProvider(false)} className="px-4 py-2 rounded-xl bg-slate-100 text-slate-700 text-sm font-medium hover:bg-slate-200">取消</button>
+                <button onClick={handleAddProvider} disabled={loading} className="px-4 py-2 rounded-xl bg-purple-500 text-white text-sm font-medium hover:bg-purple-600 disabled:opacity-50">
+                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : '添加'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

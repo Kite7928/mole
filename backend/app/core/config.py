@@ -1,6 +1,22 @@
 from pydantic_settings import BaseSettings
+from pydantic import field_validator
 from typing import Optional
-import os
+import secrets
+from pathlib import Path
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+BACKEND_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _default_database_url() -> str:
+    """构建默认数据库 URL（可被环境变量覆盖）"""
+    return f"sqlite+aiosqlite:///{(BACKEND_ROOT / 'app.db').as_posix()}"
+
+
+def _default_upload_dir() -> str:
+    """构建默认上传目录（可被环境变量覆盖）"""
+    return (BACKEND_ROOT / "uploads").as_posix()
 
 
 class Settings(BaseSettings):
@@ -10,15 +26,15 @@ class Settings(BaseSettings):
     APP_NAME: str = "AI公众号写作助手"
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = False
-    SECRET_KEY: str = "your-secret-key-change-in-production"
+    SECRET_KEY: str = secrets.token_urlsafe(32)
 
     # Server
     HOST: str = "0.0.0.0"
     PORT: int = 8000
-    CORS_ORIGINS: list = ["*"]
+    CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
 
-    # Database (优先使用环境变量，适用于部署环境)
-    DATABASE_URL: str = "sqlite+aiosqlite:///./app.db"
+    # Database (使用绝对路径，避免工作目录问题)
+    DATABASE_URL: str = _default_database_url()
 
     # AI Configuration - OpenAI
     OPENAI_API_KEY: Optional[str] = None
@@ -58,6 +74,11 @@ class Settings(BaseSettings):
     COGVIEW_BASE_URL: str = "https://open.bigmodel.cn/api/paas/v4/images/generations"
     COGVIEW_MODEL: str = "cogview-3-flash"
 
+    # Image Generation - Tongyi Wanxiang (阿里通义万相)
+    TONGYI_WANXIANG_API_KEY: Optional[str] = None
+    TONGYI_WANXIANG_BASE_URL: str = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis"
+    TONGYI_WANXIANG_MODEL: str = "wanx-v1"
+
     # AI Configuration - Zhipu AI (智谱)
     ZHIPU_API_KEY: Optional[str] = None
     ZHIPU_BASE_URL: str = "https://open.bigmodel.cn/api/paas/v4"
@@ -77,9 +98,12 @@ class Settings(BaseSettings):
     # Data Sources
     NEWS_SOURCES: list = ["ithome", "36kr", "baidu"]
     NEWS_REFRESH_INTERVAL: int = 1800  # 30 minutes
+    RSS_FETCH_RETRIES: int = 2
+    RSS_FETCH_RETRY_DELAY: float = 0.8
+    RSSHUB_BASE_URL: str = "https://rsshub.app"
 
     # File Storage
-    UPLOAD_DIR: str = "uploads"
+    UPLOAD_DIR: str = _default_upload_dir()
     TEMP_DIR: str = "temp"
     MAX_UPLOAD_SIZE: int = 20 * 1024 * 1024  # 20MB
 
@@ -100,8 +124,79 @@ class Settings(BaseSettings):
     DB_POOL_RECYCLE: int = 3600
     DB_POOL_PRE_PING: bool = True
 
+    # Mock/Fallback Configuration
+    # 生产环境建议关闭，避免隐式返回模拟数据误导业务判断
+    ALLOW_MOCK_FALLBACK: bool = False
+
+    @field_validator("CORS_ORIGINS", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, v):
+        """兼容 JSON 数组与逗号分隔字符串两种 CORS 配置格式"""
+        if isinstance(v, str):
+            value = v.strip()
+            if not value:
+                return ["http://localhost:3000", "http://127.0.0.1:3000"]
+
+            if value.startswith("[") and value.endswith("]"):
+                import json
+                return json.loads(value)
+
+            return [origin.strip() for origin in value.split(",") if origin.strip()]
+
+        return v
+
+    @field_validator("DATABASE_URL", mode="before")
+    @classmethod
+    def normalize_database_url(cls, v):
+        """将 sqlite 相对路径标准化为项目根目录绝对路径"""
+        if not isinstance(v, str):
+            return v
+
+        if not v.startswith("sqlite"):
+            return v
+
+        if ":///" not in v:
+            return v
+
+        schema, path_part = v.split(":///", 1)
+        if not path_part or path_part == ":memory:":
+            return v
+
+        db_path = Path(path_part)
+        if not db_path.is_absolute():
+            db_path = (PROJECT_ROOT / db_path).resolve()
+            return f"{schema}:///{db_path.as_posix()}"
+
+        return v
+
+    @field_validator("UPLOAD_DIR", mode="before")
+    @classmethod
+    def normalize_upload_dir(cls, v):
+        """将上传目录标准化为项目根目录绝对路径"""
+        if not v:
+            return _default_upload_dir()
+
+        upload_path = Path(str(v))
+        if not upload_path.is_absolute():
+            upload_path = (PROJECT_ROOT / upload_path).resolve()
+
+        return upload_path.as_posix()
+
+    @field_validator("RSSHUB_BASE_URL", mode="before")
+    @classmethod
+    def normalize_rsshub_base_url(cls, v):
+        """标准化 RSSHub 基础地址，移除尾部斜杠。"""
+        if v is None:
+            return ""
+
+        value = str(v).strip()
+        if not value:
+            return ""
+
+        return value.rstrip("/")
+
     class Config:
-        env_file = ".env"
+        env_file = [str(PROJECT_ROOT / ".env"), str(BACKEND_ROOT / ".env")]
         case_sensitive = True
         extra = "allow"  # Allow extra fields from .env
 

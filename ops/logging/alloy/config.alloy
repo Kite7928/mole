@@ -1,0 +1,41 @@
+logging {
+  level  = "info"
+  format = "logfmt"
+}
+
+local.file_match "backend_logs" {
+  path_targets = [
+    {"__path__" = "/workspace/backend/logs/*.log", "service" = "backend", "job" = "gzh-backend"},
+  ]
+}
+
+local.file_match "root_logs" {
+  path_targets = [
+    {"__path__" = "/workspace/logs/*.log", "service" = "app", "job" = "gzh-root"},
+  ]
+}
+
+loki.source.file "backend_logs" {
+  targets               = local.file_match.backend_logs.targets
+  tail_from_end         = true
+  forward_to            = [loki.write.default.receiver]
+  legacy_positions_file = "/tmp/alloy-backend-positions.yaml"
+}
+
+loki.source.file "root_logs" {
+  targets               = local.file_match.root_logs.targets
+  tail_from_end         = true
+  forward_to            = [loki.write.default.receiver]
+  legacy_positions_file = "/tmp/alloy-root-positions.yaml"
+}
+
+loki.write "default" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+  external_labels = {
+    project = "gzh",
+    env     = "local",
+  }
+}
+
