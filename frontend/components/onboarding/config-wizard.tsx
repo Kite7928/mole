@@ -46,6 +46,8 @@ const steps: WizardStep[] = [
   }
 ]
 
+const DEV88_DEFAULT_MODEL = 'gpt-5-nano [渠道id:33][輸出3k上限]'
+
 export function ConfigWizard() {
   const router = useRouter()
   const [currentStep, setCurrentStep] = useState(0)
@@ -58,7 +60,7 @@ export function ConfigWizard() {
     aiProvider: 'openai',
     apiKey: '',
     baseUrl: 'https://api.dev88.tech/v1',
-    model: 'gpt-5-nano',
+    model: DEV88_DEFAULT_MODEL,
     wechatAppId: '',
     wechatAppSecret: '',
   })
@@ -259,7 +261,7 @@ export function ConfigWizard() {
                 type="text"
                 value={config.model}
                 onChange={(e) => setConfig(prev => ({ ...prev, model: e.target.value }))}
-                placeholder="gpt-5-nano"
+                placeholder={DEV88_DEFAULT_MODEL}
                 className="w-full bg-[#1a1d29] border border-white/10 rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none"
               />
             </div>

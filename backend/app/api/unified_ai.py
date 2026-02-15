@@ -216,6 +216,7 @@ async def generate_titles(request: GenerateTitlesRequest, db: AsyncSession = Dep
             timeout=httpx.Timeout(120.0, connect=10.0, read=60.0, write=60.0),
             follow_redirects=True,
             limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),
+            trust_env=False,
         )
         
         # 创建OpenAI客户端（使用async with自动管理连接）
@@ -425,7 +426,8 @@ async def generate_content(request: GenerateContentRequest, db: AsyncSession = D
         http_client = httpx.AsyncClient(
             verify=False,  # 禁用 SSL 验证（开发环境）
             timeout=httpx.Timeout(300.0, connect=10.0),
-            follow_redirects=True
+            follow_redirects=True,
+            trust_env=False,
         )
         
         # 创建OpenAI客户端（使用async with自动管理连接）
@@ -680,6 +682,7 @@ async def generate_batch_articles(request: BatchArticleRequest, db: AsyncSession
             verify=False,
             timeout=httpx.Timeout(120.0, connect=10.0, read=60.0, write=60.0),
             follow_redirects=True,
+            trust_env=False,
         )
         
         model = request.model or config.model or "deepseek-chat"
@@ -872,7 +875,8 @@ async def auto_generate(request: AutoGenerateRequest, db: AsyncSession = Depends
         http_client = httpx.AsyncClient(
             verify=False,  # 禁用 SSL 验证（开发环境）
             timeout=httpx.Timeout(300.0, connect=10.0),  # 增加到300秒，生成正文需要更长时间
-            follow_redirects=True
+            follow_redirects=True,
+            trust_env=False,
         )
         
         # 创建OpenAI客户端（使用async with自动管理连接）
@@ -1135,7 +1139,8 @@ async def score_title(request: TitleScoreRequest, db: AsyncSession = Depends(get
         # 创建AI客户端
         http_client = httpx.AsyncClient(
             verify=False,
-            timeout=httpx.Timeout(60.0, connect=10.0)
+            timeout=httpx.Timeout(60.0, connect=10.0),
+            trust_env=False,
         )
         
         client = AsyncOpenAI(

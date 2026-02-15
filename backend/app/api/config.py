@@ -51,6 +51,12 @@ class ProviderConfigRequest(BaseModel):
     is_default: bool = Field(default=False, description="是否为默认提供商")
 
 
+class ActivateProviderRequest(BaseModel):
+    """激活默认提供商请求"""
+    wechat_app_id: Optional[str] = Field(None, description="微信AppID")
+    wechat_app_secret: Optional[str] = Field(None, description="微信AppSecret")
+
+
 # ==================== 多AI提供商配置管理 ====================
 
 @router.get("/providers", response_model=dict)
@@ -242,6 +248,42 @@ async def save_provider_config(
     except Exception as e:
         logger.error(f"保存提供商配置失败: {str(e)}")
         raise HTTPException(status_code=500, detail=f"保存提供商配置失败: {str(e)}")
+
+
+@router.post("/providers/{provider}/activate", response_model=dict)
+async def activate_provider(
+    provider: str,
+    request: ActivateProviderRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    激活指定提供商为默认提供商，并同步到 app_config。
+
+    Args:
+        provider: 提供商标识
+        request: 激活请求（可携带微信配置）
+
+    Returns:
+        激活结果
+    """
+    try:
+        activated_config = await config_service.activate_provider(
+            db=db,
+            provider=provider,
+            wechat_app_id=request.wechat_app_id,
+            wechat_app_secret=request.wechat_app_secret,
+        )
+
+        return {
+            "success": True,
+            "message": f"已切换默认提供商为 {provider}",
+            "config": activated_config
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"激活提供商失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"激活提供商失败: {str(e)}")
 
 
 @router.delete("/providers/{provider}", response_model=dict)

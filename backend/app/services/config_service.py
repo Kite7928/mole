@@ -295,6 +295,82 @@ class ConfigService:
             logger.error(f"获取启用提供商失败: {str(e)}")
             raise
 
+    async def activate_provider(
+        self,
+        db: AsyncSession,
+        provider: str,
+        wechat_app_id: Optional[str] = None,
+        wechat_app_secret: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        将指定提供商设为默认，并同步到 app_config。
+
+        Args:
+            db: 数据库会话
+            provider: 提供商标识
+            wechat_app_id: 微信 AppID（可选）
+            wechat_app_secret: 微信 AppSecret（可选）
+
+        Returns:
+            激活后的核心配置
+        """
+        try:
+            provider_query = select(AIProviderConfig).where(AIProviderConfig.provider == provider)
+            provider_result = await db.execute(provider_query)
+            provider_config = provider_result.scalar_one_or_none()
+
+            if not provider_config or not provider_config.api_key:
+                raise ValueError(f"提供商 {provider} 未配置 API Key，请先保存该提供商配置")
+
+            default_result = await db.execute(
+                select(AIProviderConfig).where(AIProviderConfig.is_default == True)
+            )
+            for default_config in default_result.scalars().all():
+                default_config.is_default = False
+
+            provider_config.is_default = True
+            provider_config.is_enabled = True
+
+            app_query = select(AppConfig).order_by(AppConfig.id.desc())
+            app_result = await db.execute(app_query)
+            app_config = app_result.scalar_one_or_none()
+
+            if app_config:
+                app_config.ai_provider = provider
+                app_config.api_key = provider_config.api_key
+                app_config.base_url = provider_config.base_url
+                app_config.model = provider_config.model
+
+                if wechat_app_id is not None:
+                    app_config.wechat_app_id = wechat_app_id
+                if wechat_app_secret is not None:
+                    app_config.wechat_app_secret = wechat_app_secret
+            else:
+                app_config = AppConfig(
+                    ai_provider=provider,
+                    api_key=provider_config.api_key,
+                    base_url=provider_config.base_url,
+                    model=provider_config.model,
+                    wechat_app_id=wechat_app_id,
+                    wechat_app_secret=wechat_app_secret,
+                    enable_auto_publish=False,
+                    max_news_count=20,
+                )
+                db.add(app_config)
+
+            await db.commit()
+
+            return {
+                "ai_provider": provider,
+                "base_url": provider_config.base_url,
+                "model": provider_config.model,
+            }
+
+        except Exception as e:
+            logger.error(f"激活提供商失败: {str(e)}")
+            await db.rollback()
+            raise
+
     # ==================== 原有单配置管理（保持兼容） ====================
 
     async def get_config(self, db: AsyncSession) -> Dict[str, Any]:
@@ -442,24 +518,25 @@ class ConfigService:
         """
         try:
             from openai import AsyncOpenAI
+            import httpx
 
-            # 创建客户端
-            client = AsyncOpenAI(
-                api_key=api_key,
-                base_url=base_url
-            )
-
-            # 测试调用（使用英文避免编码问题）
-            response = await client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "user", "content": "Hello"}
-                ],
-                max_tokens=10
-            )
-
-            # 关闭客户端
-            await client.close()
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(60.0, connect=15.0, read=60.0, write=30.0),
+                trust_env=False,
+            ) as http_client:
+                async with AsyncOpenAI(
+                    api_key=api_key,
+                    base_url=base_url,
+                    http_client=http_client,
+                ) as client:
+                    # 测试调用（使用英文避免编码问题）
+                    await client.chat.completions.create(
+                        model=model,
+                        messages=[
+                            {"role": "user", "content": "Hello"}
+                        ],
+                        max_tokens=10
+                    )
 
             return {
                 "success": True,

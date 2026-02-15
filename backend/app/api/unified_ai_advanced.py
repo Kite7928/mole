@@ -173,7 +173,7 @@ async def generate_outline(request: GenerateOutlineRequest, db: AsyncSession = D
 score为标题质量评分（0-100）。"""
 
         # 调用AI
-        http_client = httpx.AsyncClient(verify=False, timeout=120.0, follow_redirects=True)
+        http_client = httpx.AsyncClient(verify=False, timeout=120.0, follow_redirects=True, trust_env=False)
         async with AsyncOpenAI(api_key=config.api_key, base_url=base_url, http_client=http_client) as client:
             response = await client.chat.completions.create(
                 model=model,
@@ -290,7 +290,7 @@ async def expand_section(request: ExpandSectionRequest, db: AsyncSession = Depen
 
 请直接输出扩写内容，不要包含任何说明文字。"""
 
-        http_client = httpx.AsyncClient(verify=False, timeout=120.0, follow_redirects=True)
+        http_client = httpx.AsyncClient(verify=False, timeout=120.0, follow_redirects=True, trust_env=False)
         async with AsyncOpenAI(api_key=config.api_key, base_url=base_url, http_client=http_client) as client:
             response = await client.chat.completions.create(
                 model=model,
@@ -400,7 +400,7 @@ async def polish_article(request: PolishArticleRequest, db: AsyncSession = Depen
 
 请直接输出优化后的文章内容，不要包含任何说明文字。"""
 
-        http_client = httpx.AsyncClient(verify=False, timeout=300.0, follow_redirects=True)
+        http_client = httpx.AsyncClient(verify=False, timeout=300.0, follow_redirects=True, trust_env=False)
         async with AsyncOpenAI(api_key=config.api_key, base_url=base_url, http_client=http_client) as client:
             response = await client.chat.completions.create(
                 model=model,

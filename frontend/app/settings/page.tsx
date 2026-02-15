@@ -21,6 +21,14 @@ import {
 } from 'lucide-react'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+const DEV88_DEFAULT_MODEL = 'gpt-5-nano [渠道id:33][輸出3k上限]'
+
+const normalizeOpenAIModel = (baseUrl: string, model: string) => {
+  if (baseUrl.includes('api.dev88.tech') && model === 'gpt-5-nano') {
+    return DEV88_DEFAULT_MODEL
+  }
+  return model
+}
 
 const defaultProviderTypes = [
   { type: 'pollinations', name: 'Pollinations.ai', description: '完全免费，无需API Key', requires_config: false, recommended: true },
@@ -43,7 +51,7 @@ export default function SettingsPage() {
     deepseekModel: 'deepseek-chat',
     openaiApiKey: '',
     openaiBaseUrl: 'https://api.dev88.tech/v1',
-    openaiModel: 'gpt-5-nano',
+    openaiModel: DEV88_DEFAULT_MODEL,
     geminiApiKey: '',
     geminiBaseUrl: 'https://generativelanguage.googleapis.com/v1beta',
     geminiModel: 'gemini-pro',
@@ -94,7 +102,10 @@ export default function SettingsPage() {
             } else if (activeProvider === 'openai') {
               nextConfig.openaiApiKey = data.config.api_key || ''
               nextConfig.openaiBaseUrl = data.config.base_url || prev.openaiBaseUrl
-              nextConfig.openaiModel = data.config.model || prev.openaiModel
+              nextConfig.openaiModel = normalizeOpenAIModel(
+                nextConfig.openaiBaseUrl,
+                data.config.model || prev.openaiModel,
+              )
             } else if (activeProvider === 'gemini') {
               nextConfig.geminiApiKey = data.config.api_key || ''
               nextConfig.geminiBaseUrl = data.config.base_url || prev.geminiBaseUrl
@@ -118,7 +129,10 @@ export default function SettingsPage() {
             deepseekBaseUrl: providerMap.deepseek?.base_url || prev.deepseekBaseUrl,
             deepseekModel: providerMap.deepseek?.model || prev.deepseekModel,
             openaiBaseUrl: providerMap.openai?.base_url || prev.openaiBaseUrl,
-            openaiModel: providerMap.openai?.model || prev.openaiModel,
+            openaiModel: normalizeOpenAIModel(
+              providerMap.openai?.base_url || prev.openaiBaseUrl,
+              providerMap.openai?.model || prev.openaiModel,
+            ),
             geminiBaseUrl: providerMap.gemini?.base_url || prev.geminiBaseUrl,
             geminiModel: providerMap.gemini?.model || prev.geminiModel,
           }))
@@ -296,7 +310,7 @@ export default function SettingsPage() {
           provider: 'openai',
           api_key: config.openaiApiKey.trim(),
           base_url: config.openaiBaseUrl,
-          model: config.openaiModel,
+          model: normalizeOpenAIModel(config.openaiBaseUrl, config.openaiModel),
         },
         {
           provider: 'gemini',
@@ -305,13 +319,6 @@ export default function SettingsPage() {
           model: config.geminiModel,
         },
       ]
-
-      const activeProviderPayload = providerPayloads.find(item => item.provider === config.aiProvider)
-
-      if (!activeProviderPayload?.api_key) {
-        alert('请先填写默认提供商的 API Key')
-        return
-      }
 
       const providerSaveRequests = providerPayloads
         .filter(item => item.api_key)
@@ -325,7 +332,7 @@ export default function SettingsPage() {
               base_url: item.base_url,
               model: item.model,
               is_enabled: true,
-              is_default: item.provider === config.aiProvider,
+              is_default: false,
             }),
           })
         )
@@ -336,23 +343,24 @@ export default function SettingsPage() {
         throw new Error('保存提供商配置失败')
       }
 
-      const response = await fetch(`${API_URL}/api/config`, {
+      const response = await fetch(`${API_URL}/api/config/providers/${config.aiProvider}/activate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ai_provider: config.aiProvider,
-          api_key: activeProviderPayload.api_key,
-          base_url: activeProviderPayload.base_url,
-          model: activeProviderPayload.model,
           wechat_app_id: config.wechatAppId,
           wechat_app_secret: config.wechatAppSecret,
         }),
       })
-      if (!response.ok) throw new Error('保存失败')
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null)
+        throw new Error(errorData?.detail || '保存失败')
+      }
+
       setSaved(true)
       setTimeout(() => setSaved(false), 3000)
     } catch (error) {
-      alert('保存配置失败')
+      const message = error instanceof Error ? error.message : '保存配置失败'
+      alert(message)
     } finally {
       setLoading(false)
     }
@@ -548,7 +556,8 @@ export default function SettingsPage() {
                 <div>
                   <label className="block text-xs text-slate-500 mb-1.5">Model</label>
                   <select value={config.openaiModel} onChange={(e) => setConfig({ ...config, openaiModel: e.target.value })} className={inputClasses}>
-                    <option value="gpt-5-nano">GPT-5 Nano</option>
+                    <option value="gpt-5-nano [渠道id:33][輸出3k上限]">GPT-5 Nano（渠道33）</option>
+                    <option value="gpt-5-nano">GPT-5 Nano（通用别名）</option>
                     <option value="claude-sonnet-4.5">Claude Sonnet 4.5</option>
                     <option value="moonshotai/kimi-k2-thinking">Kimi K2 Thinking</option>
                     <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>

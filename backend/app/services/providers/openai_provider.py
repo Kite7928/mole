@@ -33,10 +33,11 @@ class OpenAICompatibleProvider(BaseAIProvider):
                 import httpx
                 # 设置更长的超时时间（连接30秒，读取10分钟），确保长内容生成不会中断
                 timeout = httpx.Timeout(600.0, connect=30.0, read=600.0, write=60.0)
+                http_client = httpx.AsyncClient(timeout=timeout, trust_env=False)
                 self._client = AsyncOpenAI(
                     api_key=self.api_key or "dummy",
                     base_url=self.base_url,
-                    timeout=timeout,
+                    http_client=http_client,
                     max_retries=2
                 )
                 logger.info(f"{self.provider_type.value} 提供商初始化成功（超时: 600秒）")

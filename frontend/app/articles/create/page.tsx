@@ -76,7 +76,7 @@ export default function ArticleCreate() {
   const [isGenerating, setIsGenerating] = useState(false)
   const [selectedTitleCandidates, setSelectedTitleCandidates] = useState<string[]>([])
   const [topic, setTopic] = useState('')
-  const [aiModel, setAiModel] = useState('gpt-5-nano')
+  const [aiModel, setAiModel] = useState('gpt-5-nano [渠道id:33][輸出3k上限]')
   const [writingStyle, setWritingStyle] = useState('professional')
   const [generatedTitles, setGeneratedTitles] = useState<TitleOption[]>([])
   const [generatedContent, setGeneratedContent] = useState<GeneratedContentState | null>(null)
@@ -662,7 +662,7 @@ export default function ArticleCreate() {
   }
 
   const aiModels = [
-    { id: 'gpt-5-nano', name: 'GPT-5 Nano', icon: '🧠', desc: '默认' },
+    { id: 'gpt-5-nano [渠道id:33][輸出3k上限]', name: 'GPT-5 Nano', icon: '🧠', desc: '默认渠道33' },
     { id: 'claude-sonnet-4.5', name: 'Claude Sonnet 4.5', icon: '✨', desc: '渠道33' },
     { id: 'moonshotai/kimi-k2-thinking', name: 'Kimi K2 Thinking', icon: '🌙', desc: '深度思考' },
     { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', icon: '💎', desc: '渠道33' },
