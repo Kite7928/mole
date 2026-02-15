@@ -71,6 +71,13 @@ Thumbs.db
 *.tmp
 *.temp
 .cache/
+*.backup
+*.bak
+nul
+
+# Local archives and generated assets
+archive/
+backend/uploads/
 
 # Docker
 .dockerignore
