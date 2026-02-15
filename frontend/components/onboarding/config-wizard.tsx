@@ -57,8 +57,8 @@ export function ConfigWizard() {
   const [config, setConfig] = useState({
     aiProvider: 'openai',
     apiKey: '',
-    baseUrl: 'https://api.openai.com/v1',
-    model: 'gpt-4-turbo-preview',
+    baseUrl: 'https://api.dev88.tech/v1',
+    model: 'gpt-5-nano',
     wechatAppId: '',
     wechatAppSecret: '',
   })
@@ -197,7 +197,7 @@ export function ConfigWizard() {
                     ...prev,
                     aiProvider: provider,
                     baseUrl: provider === 'openai' 
-                      ? 'https://api.openai.com/v1'
+                      ? 'https://api.dev88.tech/v1'
                       : provider === 'deepseek'
                       ? 'https://api.deepseek.com/v1'
                       : provider === 'gemini'
@@ -246,7 +246,7 @@ export function ConfigWizard() {
                 type="text"
                 value={config.baseUrl}
                 onChange={(e) => setConfig(prev => ({ ...prev, baseUrl: e.target.value }))}
-                placeholder="https://api.openai.com/v1"
+                placeholder="https://api.dev88.tech/v1"
                 className="w-full bg-[#1a1d29] border border-white/10 rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none"
               />
             </div>
@@ -259,7 +259,7 @@ export function ConfigWizard() {
                 type="text"
                 value={config.model}
                 onChange={(e) => setConfig(prev => ({ ...prev, model: e.target.value }))}
-                placeholder="gpt-4-turbo-preview"
+                placeholder="gpt-5-nano"
                 className="w-full bg-[#1a1d29] border border-white/10 rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none"
               />
             </div>

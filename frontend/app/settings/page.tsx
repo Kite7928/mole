@@ -41,8 +41,8 @@ export default function SettingsPage() {
     deepseekBaseUrl: 'https://api.deepseek.com/v1',
     deepseekModel: 'deepseek-chat',
     openaiApiKey: '',
-    openaiBaseUrl: 'https://api.openai.com/v1',
-    openaiModel: 'gpt-4-turbo-preview',
+    openaiBaseUrl: 'https://api.dev88.tech/v1',
+    openaiModel: 'gpt-5-nano',
     geminiApiKey: '',
     geminiModel: 'gemini-pro',
     wechatAppId: '',
@@ -438,9 +438,11 @@ export default function SettingsPage() {
                 <div>
                   <label className="block text-xs text-slate-500 mb-1.5">Model</label>
                   <select value={config.openaiModel} onChange={(e) => setConfig({ ...config, openaiModel: e.target.value })} className={inputClasses}>
+                    <option value="gpt-5-nano">GPT-5 Nano</option>
+                    <option value="claude-sonnet-4.5">Claude Sonnet 4.5</option>
+                    <option value="moonshotai/kimi-k2-thinking">Kimi K2 Thinking</option>
+                    <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
                     <option value="gpt-4-turbo-preview">GPT-4 Turbo</option>
-                    <option value="gpt-4">GPT-4</option>
-                    <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
                   </select>
                 </div>
               </div>

@@ -76,7 +76,7 @@ export default function ArticleCreate() {
   const [isGenerating, setIsGenerating] = useState(false)
   const [selectedTitleCandidates, setSelectedTitleCandidates] = useState<string[]>([])
   const [topic, setTopic] = useState('')
-  const [aiModel, setAiModel] = useState('qwen-max')
+  const [aiModel, setAiModel] = useState('gpt-5-nano')
   const [writingStyle, setWritingStyle] = useState('professional')
   const [generatedTitles, setGeneratedTitles] = useState<TitleOption[]>([])
   const [generatedContent, setGeneratedContent] = useState<GeneratedContentState | null>(null)
@@ -662,10 +662,12 @@ export default function ArticleCreate() {
   }
 
   const aiModels = [
-    { id: 'qwen-max', name: '通义千问', icon: '🌐', desc: '推荐' },
-    { id: 'deepseek-chat', name: 'DeepSeek', icon: '🚀', desc: '性价比' },
-    { id: 'gpt-4-turbo-preview', name: 'GPT-4', icon: '🧠', desc: '最强' },
-    { id: 'claude-3-opus-20240229', name: 'Claude', icon: '🎭', desc: '创意' },
+    { id: 'gpt-5-nano', name: 'GPT-5 Nano', icon: '🧠', desc: '默认' },
+    { id: 'claude-sonnet-4.5', name: 'Claude Sonnet 4.5', icon: '✨', desc: '渠道33' },
+    { id: 'moonshotai/kimi-k2-thinking', name: 'Kimi K2 Thinking', icon: '🌙', desc: '深度思考' },
+    { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', icon: '💎', desc: '渠道33' },
+    { id: 'qwen-max', name: '通义千问', icon: '🌐', desc: '备选' },
+    { id: 'deepseek-chat', name: 'DeepSeek', icon: '🚀', desc: '备选' },
   ]
 
   const writingStyles = [
