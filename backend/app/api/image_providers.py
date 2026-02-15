@@ -265,40 +265,66 @@ async def quick_setup(db: AsyncSession = Depends(get_db)):
     """
     快速设置 - 创建推荐的默认配置
     
-    会自动创建以下免费提供商的默认配置（按优先级排序）：
-    1. Pollinations.ai（无需API Key，完全免费）
-    2. Pexels（免费图库，需要API Key但免费注册）
+    会自动创建以下推荐图源（按优先级排序）：
+    1. 通义万相（主图源，需API Key）
+    2. Pollinations.ai（P次级回退，无需API Key）
+    3. Pexels（补充图库，需API Key）
     """
     try:
         created_configs = []
-        
-        # 1. 创建Pollinations配置（无需API Key）
+        from ..core.config import settings
+        tongyi_api_key = settings.COGVIEW_API_KEY or settings.TONGYI_WANXIANG_API_KEY or ""
+        has_tongyi_key = bool(tongyi_api_key)
+
+        # 1. 创建通义万相配置（主图源）
         try:
             config1 = await image_provider_manager.create_config(
                 db=db,
-                provider_type="pollinations",
-                name="Pollinations.ai（免费）",
-                api_config={},
-                default_params={"width": 900, "height": 500, "model": "flux"},
-                is_default=True,
+                provider_type="tongyi_wanxiang",
+                name="通义万相（阿里）",
+                api_config={
+                    "api_key": tongyi_api_key,
+                    "base_url": "https://dashscope.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis",
+                    "model": "wanx-v1"
+                },
+                default_params={"width": 900, "height": 500, "style": "<auto>"},
+                is_default=has_tongyi_key,
+                is_enabled=has_tongyi_key,
                 priority=0
             )
-            created_configs.append({"id": config1.id, "name": config1.name, "type": "pollinations"})
+            created_configs.append({"id": config1.id, "name": config1.name, "type": "tongyi_wanxiang"})
+        except Exception as e:
+            logger.warning(f"创建通义万相配置失败: {e}")
+        
+        # 2. 创建Pollinations配置（P次级回退）
+        try:
+            config2 = await image_provider_manager.create_config(
+                db=db,
+                provider_type="pollinations",
+                name="Pollinations.ai（免费回退）",
+                api_config={},
+                default_params={"width": 900, "height": 500, "model": "flux"},
+                is_default=not has_tongyi_key,
+                is_enabled=True,
+                priority=1
+            )
+            created_configs.append({"id": config2.id, "name": config2.name, "type": "pollinations"})
         except Exception as e:
             logger.warning(f"创建Pollinations配置失败: {e}")
         
-        # 2. 创建Pexels配置（需要用户后续填写API Key）
+        # 3. 创建Pexels配置（需要用户后续填写API Key）
         try:
-            config2 = await image_provider_manager.create_config(
+            config3 = await image_provider_manager.create_config(
                 db=db,
                 provider_type="pexels",
                 name="Pexels免费图库（需配置API Key）",
                 api_config={"api_key": "请填写你的Pexels API Key"},
                 default_params={"width": 900, "height": 500},
                 is_default=False,
-                priority=1
+                is_enabled=True,
+                priority=2
             )
-            created_configs.append({"id": config2.id, "name": config2.name, "type": "pexels"})
+            created_configs.append({"id": config3.id, "name": config3.name, "type": "pexels"})
         except Exception as e:
             logger.warning(f"创建Pexels配置失败: {e}")
         
@@ -306,7 +332,7 @@ async def quick_setup(db: AsyncSession = Depends(get_db)):
             "success": True,
             "message": f"快速设置完成，创建了 {len(created_configs)} 个配置",
             "configs": created_configs,
-            "note": "Pollinations.ai 可以立即使用（无需API Key），Pexels需要配置API Key后使用"
+            "note": "当前策略：通义主图源，Pollinations次级回退；若未配置通义Key则默认回退到Pollinations"
         }
         
     except Exception as e:
@@ -318,7 +344,7 @@ class TongyiConfigRequest(BaseModel):
     """通义万相配置请求"""
     api_key: str = Field(..., min_length=10, description="阿里云API Key")
     name: str = Field(default="通义万相（阿里）", description="配置名称")
-    is_default: bool = Field(default=False, description="是否设为默认")
+    is_default: bool = Field(default=True, description="是否设为默认")
 
 
 @router.post("/setup-tongyi", response_model=dict)
@@ -354,6 +380,7 @@ async def setup_tongyi(
                 "style": "<auto>"
             },
             is_default=request.is_default,
+            is_enabled=True,
             priority=0 if request.is_default else 1
         )
         

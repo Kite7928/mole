@@ -20,6 +20,14 @@ class ImageProviderManager:
     
     def __init__(self):
         self._provider_cache: Dict[str, BaseImageProvider] = {}
+        # 项目优先级：通义默认，P（Pollinations）次级，其他继续兜底
+        self._provider_priority_order = {
+            "tongyi_wanxiang": 0,
+            "pollinations": 1,
+            "pexels": 2,
+            "leonardo": 3,
+            "stable_diffusion": 4,
+        }
     
     async def _update_tongyi_api_key_if_needed(self, db: AsyncSession, configs: List[Dict[str, Any]]):
         """如果通义万相的 API Key 为空，尝试从环境变量更新"""
@@ -57,7 +65,7 @@ class ImageProviderManager:
             result = await db.execute(
                 update(ImageProviderConfig)
                 .where(ImageProviderConfig.id == tongyi_config["id"])
-                .values(api_config=json.dumps(api_config))
+                .values(api_config=json.dumps(api_config), is_enabled=True)
             )
             await db.commit()
             
@@ -85,54 +93,13 @@ class ImageProviderManager:
             return []
         
         created_configs = []
-        
-        # 1. 创建 Pollinations 配置（无需API Key，完全免费）
+        from ..core.config import settings
+        tongyi_api_key = settings.COGVIEW_API_KEY or settings.TONGYI_WANXIANG_API_KEY or ""
+        has_tongyi_key = bool(tongyi_api_key)
+
+        # 1. 通义万相（主图源）
         try:
             config1 = await self.create_config(
-                db=db,
-                provider_type="pollinations",
-                name="Pollinations.ai（免费推荐）",
-                api_config={},
-                default_params={"width": 900, "height": 500, "model": "flux"},
-                is_default=True,
-                priority=0
-            )
-            created_configs.append({
-                "id": config1.id,
-                "name": config1.name,
-                "type": "pollinations",
-                "note": "无需API Key，立即可用"
-            })
-            logger.info(f"创建默认配置: {config1.name}")
-        except Exception as e:
-            logger.warning(f"创建Pollinations配置失败: {e}")
-        
-        # 2. 创建 Pexels 配置（需要用户后续填写API Key）
-        try:
-            config2 = await self.create_config(
-                db=db,
-                provider_type="pexels",
-                name="Pexels免费图库",
-                api_config={"api_key": ""},
-                default_params={"width": 900, "height": 500},
-                is_default=False,
-                priority=1
-            )
-            created_configs.append({
-                "id": config2.id,
-                "name": config2.name,
-                "type": "pexels",
-                "note": "需要配置API Key后使用"
-            })
-            logger.info(f"创建默认配置: {config2.name}")
-        except Exception as e:
-            logger.warning(f"创建Pexels配置失败: {e}")
-        
-        # 3. 创建通义万相配置（从环境变量读取API Key）
-        try:
-            from ..core.config import settings
-            tongyi_api_key = settings.COGVIEW_API_KEY or ""  # 使用COGVIEW的API Key（同属于智谱/阿里生态）
-            config3 = await self.create_config(
                 db=db,
                 provider_type="tongyi_wanxiang",
                 name="通义万相（阿里）",
@@ -142,18 +109,63 @@ class ImageProviderManager:
                     "model": "wanx-v1"
                 },
                 default_params={"width": 900, "height": 500, "style": "<auto>"},
+                is_default=has_tongyi_key,
+                is_enabled=has_tongyi_key,
+                priority=0
+            )
+            created_configs.append({
+                "id": config1.id,
+                "name": config1.name,
+                "type": "tongyi_wanxiang",
+                "note": "已设为主图源" if has_tongyi_key else "已创建，待配置 API Key 后启用"
+            })
+            logger.info(f"创建默认配置: {config1.name}")
+        except Exception as e:
+            logger.warning(f"创建通义万相配置失败: {e}")
+
+        # 2. Pollinations（P 次级回退）
+        try:
+            config2 = await self.create_config(
+                db=db,
+                provider_type="pollinations",
+                name="Pollinations.ai（免费回退）",
+                api_config={},
+                default_params={"width": 900, "height": 500, "model": "flux"},
+                is_default=not has_tongyi_key,
+                is_enabled=True,
+                priority=1
+            )
+            created_configs.append({
+                "id": config2.id,
+                "name": config2.name,
+                "type": "pollinations",
+                "note": "作为通义失败时的自动回退"
+            })
+            logger.info(f"创建默认配置: {config2.name}")
+        except Exception as e:
+            logger.warning(f"创建Pollinations配置失败: {e}")
+
+        # 3. Pexels（补充图库）
+        try:
+            config3 = await self.create_config(
+                db=db,
+                provider_type="pexels",
+                name="Pexels免费图库",
+                api_config={"api_key": ""},
+                default_params={"width": 900, "height": 500},
                 is_default=False,
+                is_enabled=True,
                 priority=2
             )
             created_configs.append({
                 "id": config3.id,
                 "name": config3.name,
-                "type": "tongyi_wanxiang",
-                "note": "需要配置阿里云API Key后使用"
+                "type": "pexels",
+                "note": "需要配置 API Key 后可用"
             })
             logger.info(f"创建默认配置: {config3.name}")
         except Exception as e:
-            logger.warning(f"创建通义万相配置失败: {e}")
+            logger.warning(f"创建Pexels配置失败: {e}")
         
         if created_configs:
             logger.info(f"成功初始化 {len(created_configs)} 个默认图片提供商配置")
@@ -214,6 +226,7 @@ class ImageProviderManager:
         api_config: Dict[str, Any],
         default_params: Optional[Dict[str, Any]] = None,
         is_default: bool = False,
+        is_enabled: bool = True,
         priority: int = 0
     ) -> ImageProviderConfig:
         """创建配置"""
@@ -221,7 +234,6 @@ class ImageProviderManager:
         if is_default:
             await db.execute(
                 update(ImageProviderConfig)
-                .where(ImageProviderConfig.provider_type == provider_type)
                 .values(is_default=False)
             )
         
@@ -230,7 +242,7 @@ class ImageProviderManager:
             name=name,
             api_config=json.dumps(api_config) if api_config else None,
             default_params=json.dumps(default_params) if default_params else None,
-            is_enabled=True,
+            is_enabled=is_enabled,
             is_default=is_default,
             priority=priority
         )
@@ -261,7 +273,6 @@ class ImageProviderManager:
         if kwargs.get("is_default") and not config.is_default:
             await db.execute(
                 update(ImageProviderConfig)
-                .where(ImageProviderConfig.provider_type == config.provider_type)
                 .values(is_default=False)
             )
         
@@ -444,56 +455,91 @@ class ImageProviderManager:
         
         if provider_id:
             # 指定了特定提供商
-            provider = await self.get_provider_by_id(db, provider_id)
-            if provider:
-                providers_to_try.append(provider)
+            result = await db.execute(
+                select(ImageProviderConfig).where(ImageProviderConfig.id == provider_id)
+            )
+            config = result.scalar_one_or_none()
+            if config and config.is_enabled:
+                provider = self._get_or_create_provider(config)
+                if provider and provider.validate_config():
+                    providers_to_try.append((config.provider_type, provider))
         else:
-            # 获取所有启用的提供商
+            # 获取所有启用的提供商，并按项目策略排序
             configs = await self.get_all_configs(db)
-            
-            # 优先获取通义万相（如果已启用）
-            tongyi_config = None
-            other_configs = []
-            for config in configs:
-                if config.get("is_enabled"):
-                    if config.get("provider_type") == "tongyi_wanxiang":
-                        tongyi_config = config
-                    else:
-                        other_configs.append(config)
-            
-            # 通义万相优先
-            if tongyi_config:
-                provider = self._get_or_create_provider_by_config(tongyi_config)
-                if provider:
-                    providers_to_try.append(provider)
-            
-            # 然后添加其他提供商
-            for config in other_configs:
+            sorted_configs = self._sort_configs_for_generation(configs)
+
+            for config in sorted_configs:
                 provider = self._get_or_create_provider_by_config(config)
-                if provider:
-                    providers_to_try.append(provider)
+                if not provider:
+                    continue
+                if not provider.validate_config():
+                    logger.warning(f"跳过未通过配置校验的图源: {config.get('provider_type')}")
+                    continue
+                providers_to_try.append((config.get("provider_type", "unknown"), provider))
         
         if not providers_to_try:
             logger.error("没有可用的图片生成提供商")
             return None
+
+        provider_chain = " -> ".join([item[0] for item in providers_to_try])
+        logger.info(f"封面图生成候选链路: {provider_chain}")
         
         # 构建提示词
         prompt = self._build_cover_prompt(title, kwargs.get("style", "professional"))
         
         # 依次尝试每个提供商
-        for i, provider in enumerate(providers_to_try):
+        for i, (provider_name, provider) in enumerate(providers_to_try):
             try:
-                logger.info(f"尝试使用第 {i+1} 个提供商生成封面图...")
+                logger.info(f"尝试使用第 {i+1} 个提供商生成封面图: {provider_name}")
                 image_path = await provider.generate(prompt, width=width, height=height, **kwargs)
                 if image_path:
-                    logger.info(f"第 {i+1} 个提供商生成成功")
+                    logger.info(f"第 {i+1} 个提供商生成成功: {provider_name}")
                     return image_path
             except Exception as e:
-                logger.warning(f"第 {i+1} 个提供商生成失败: {e}")
+                logger.warning(f"第 {i+1} 个提供商生成失败 ({provider_name}): {e}")
                 continue
         
         logger.error("所有图片提供商都失败")
         return None
+
+    def _sort_configs_for_generation(self, configs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """按项目策略排序可用于生成的配置"""
+        enabled_configs = [cfg for cfg in configs if cfg.get("is_enabled")]
+        if not enabled_configs:
+            return []
+
+        # 每个 provider_type 只保留一个最优配置，避免重复尝试同类图源
+        best_by_type: Dict[str, Dict[str, Any]] = {}
+        for cfg in enabled_configs:
+            provider_type = cfg.get("provider_type", "")
+            current_best = best_by_type.get(provider_type)
+            if not current_best:
+                best_by_type[provider_type] = cfg
+                continue
+
+            current_key = (
+                0 if current_best.get("is_default") else 1,
+                current_best.get("priority", 999),
+                current_best.get("id", 0),
+            )
+            new_key = (
+                0 if cfg.get("is_default") else 1,
+                cfg.get("priority", 999),
+                cfg.get("id", 0),
+            )
+            if new_key < current_key:
+                best_by_type[provider_type] = cfg
+
+        ordered = list(best_by_type.values())
+        ordered.sort(
+            key=lambda cfg: (
+                self._provider_priority_order.get(cfg.get("provider_type", ""), 99),
+                0 if cfg.get("is_default") else 1,
+                cfg.get("priority", 999),
+                cfg.get("id", 0),
+            )
+        )
+        return ordered
     
     def _get_or_create_provider_by_config(self, config: Dict[str, Any]) -> Optional[BaseImageProvider]:
         """根据配置字典获取或创建提供商实例"""
