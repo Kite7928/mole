@@ -19,7 +19,11 @@ class BaseImageProvider(ABC):
     
     def __init__(self, config: Dict[str, Any]):
         self.config = config
-        self.http_client = httpx.AsyncClient(timeout=120.0, follow_redirects=True)
+        self.http_client = httpx.AsyncClient(
+            timeout=120.0,
+            follow_redirects=True,
+            trust_env=False,
+        )
     
     @abstractmethod
     async def generate(
@@ -129,7 +133,7 @@ class TongyiWanxiangProvider(BaseImageProvider):
             return await self._download_image(image_url)
             
         except Exception as e:
-            logger.error(f"通义万相生成失败: {e}")
+            logger.error(f"通义万相生成失败: {e!r}")
             return None
     
     def _convert_to_chinese_prompt(self, prompt: str) -> str:
@@ -206,7 +210,7 @@ class TongyiWanxiangProvider(BaseImageProvider):
                 await asyncio.sleep(2)
                 
             except Exception as e:
-                logger.error(f"查询任务状态失败: {e}")
+                logger.error(f"查询任务状态失败: {e!r}")
                 await asyncio.sleep(2)
         
         logger.error("通义万相任务超时")
@@ -225,7 +229,7 @@ class TongyiWanxiangProvider(BaseImageProvider):
             return temp_path
             
         except Exception as e:
-            logger.error(f"下载图片失败: {e}")
+            logger.error(f"下载图片失败: {e!r}")
             return None
 
 
@@ -475,7 +479,7 @@ class PollinationsProvider(BaseImageProvider):
             return temp_path
             
         except Exception as e:
-            logger.error(f"Pollinations生成失败: {e}")
+            logger.error(f"Pollinations生成失败: {e!r}")
             logger.error(f"Pollinations请求URL: {url[:150]}...")
             return None
 
